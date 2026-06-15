@@ -1,0 +1,195 @@
+# =============================================================================
+# Dummy entities for safely testing the Precision Climate integration.
+#
+# These mirror the REAL actuators the integration drives, but end in "_dummy"
+# and have NO physical effect:
+#
+#   Boiler   switch.wifi_smart_switch_2        -> switch.wifi_smart_switch_2_dummy
+#   Plug     switch.sonoff_zigbee_plug_3       -> switch.sonoff_zigbee_plug_3_dummy
+#   TRV 1    climate.sonoff_zigbee_trv_1_thermostat       -> ..._dummy
+#   TRV 2    climate.sonoff_zigbee_trv_2_thermostat       -> ..._dummy
+#   TRV 3    climate.sonoff_zigbee_trv_3_thermostat       -> ..._dummy
+#   TRV 4    climate.sonoff_zigbee_trv_4_thermostat       -> ..._dummy
+#   TRV 5    climate.sonoff_zigbee_trv_5_thermostat_v2    -> ..._dummy
+#   TRV 6    climate.sonoff_zigbee_trv_6_thermostat       -> ..._dummy
+#   TRV 7    climate.sonoff_zigbee_trv_7_thermostat       -> ..._dummy
+#
+# Point the Precision Climate config flow at these *_dummy entities. The dummy
+# TRVs are generic_thermostat instances (so they accept climate.set_temperature
+# and expose a "temperature" attribute exactly like a real TRV), and the dummy
+# boiler/plug are template switches you can watch toggle.
+#
+# The generic_thermostat heaters/sensors below are themselves dummy helpers, so
+# nothing here touches real hardware.
+# =============================================================================
+
+input_boolean:
+  # Backing state for the dummy boiler / plug template switches.
+  wifi_smart_switch_2_dummy_state:
+    name: "Wifi Smart Switch 2 Dummy (state)"
+    icon: mdi:water-boiler
+  sonoff_zigbee_plug_3_dummy_state:
+    name: "Sonoff Zigbee Plug 3 Dummy (state)"
+    icon: mdi:power-socket-eu
+  # Dummy "heater" each generic_thermostat toggles internally (no real effect).
+  trv_1_dummy_heater:
+    name: "TRV 1 Dummy Heater"
+  trv_2_dummy_heater:
+    name: "TRV 2 Dummy Heater"
+  trv_3_dummy_heater:
+    name: "TRV 3 Dummy Heater"
+  trv_4_dummy_heater:
+    name: "TRV 4 Dummy Heater"
+  trv_5_dummy_heater:
+    name: "TRV 5 Dummy Heater"
+  trv_6_dummy_heater:
+    name: "TRV 6 Dummy Heater"
+  trv_7_dummy_heater:
+    name: "TRV 7 Dummy Heater"
+
+input_number:
+  # Dummy current-temperature sensors feeding each generic_thermostat. Adjust
+  # these in the UI to simulate rooms warming up / cooling down during testing.
+  trv_1_dummy_temp:
+    name: "TRV 1 Dummy Temperature"
+    min: 0
+    max: 40
+    step: 0.1
+    unit_of_measurement: "°C"
+    initial: 20
+  trv_2_dummy_temp:
+    name: "TRV 2 Dummy Temperature"
+    min: 0
+    max: 40
+    step: 0.1
+    unit_of_measurement: "°C"
+    initial: 20
+  trv_3_dummy_temp:
+    name: "TRV 3 Dummy Temperature"
+    min: 0
+    max: 40
+    step: 0.1
+    unit_of_measurement: "°C"
+    initial: 20
+  trv_4_dummy_temp:
+    name: "TRV 4 Dummy Temperature"
+    min: 0
+    max: 40
+    step: 0.1
+    unit_of_measurement: "°C"
+    initial: 20
+  trv_5_dummy_temp:
+    name: "TRV 5 Dummy Temperature"
+    min: 0
+    max: 40
+    step: 0.1
+    unit_of_measurement: "°C"
+    initial: 20
+  trv_6_dummy_temp:
+    name: "TRV 6 Dummy Temperature"
+    min: 0
+    max: 40
+    step: 0.1
+    unit_of_measurement: "°C"
+    initial: 20
+  trv_7_dummy_temp:
+    name: "TRV 7 Dummy Temperature"
+    min: 0
+    max: 40
+    step: 0.1
+    unit_of_measurement: "°C"
+    initial: 20
+
+template:
+  - switch:
+      # -> switch.wifi_smart_switch_2_dummy
+      - name: "Wifi Smart Switch 2 Dummy"
+        unique_id: wifi_smart_switch_2_dummy
+        icon: mdi:water-boiler
+        state: "{{ is_state('input_boolean.wifi_smart_switch_2_dummy_state', 'on') }}"
+        turn_on:
+          - service: input_boolean.turn_on
+            target:
+              entity_id: input_boolean.wifi_smart_switch_2_dummy_state
+        turn_off:
+          - service: input_boolean.turn_off
+            target:
+              entity_id: input_boolean.wifi_smart_switch_2_dummy_state
+      # -> switch.sonoff_zigbee_plug_3_dummy
+      - name: "Sonoff Zigbee Plug 3 Dummy"
+        unique_id: sonoff_zigbee_plug_3_dummy
+        icon: mdi:power-socket-eu
+        state: "{{ is_state('input_boolean.sonoff_zigbee_plug_3_dummy_state', 'on') }}"
+        turn_on:
+          - service: input_boolean.turn_on
+            target:
+              entity_id: input_boolean.sonoff_zigbee_plug_3_dummy_state
+        turn_off:
+          - service: input_boolean.turn_off
+            target:
+              entity_id: input_boolean.sonoff_zigbee_plug_3_dummy_state
+
+climate:
+  # -> climate.sonoff_zigbee_trv_1_thermostat_dummy
+  - platform: generic_thermostat
+    name: "Sonoff Zigbee TRV 1 Thermostat Dummy"
+    unique_id: sonoff_zigbee_trv_1_thermostat_dummy
+    heater: input_boolean.trv_1_dummy_heater
+    target_sensor: input_number.trv_1_dummy_temp
+    min_temp: 4
+    max_temp: 28
+    precision: 0.1
+  # -> climate.sonoff_zigbee_trv_2_thermostat_dummy
+  - platform: generic_thermostat
+    name: "Sonoff Zigbee TRV 2 Thermostat Dummy"
+    unique_id: sonoff_zigbee_trv_2_thermostat_dummy
+    heater: input_boolean.trv_2_dummy_heater
+    target_sensor: input_number.trv_2_dummy_temp
+    min_temp: 4
+    max_temp: 28
+    precision: 0.1
+  # -> climate.sonoff_zigbee_trv_3_thermostat_dummy
+  - platform: generic_thermostat
+    name: "Sonoff Zigbee TRV 3 Thermostat Dummy"
+    unique_id: sonoff_zigbee_trv_3_thermostat_dummy
+    heater: input_boolean.trv_3_dummy_heater
+    target_sensor: input_number.trv_3_dummy_temp
+    min_temp: 4
+    max_temp: 28
+    precision: 0.1
+  # -> climate.sonoff_zigbee_trv_4_thermostat_dummy
+  - platform: generic_thermostat
+    name: "Sonoff Zigbee TRV 4 Thermostat Dummy"
+    unique_id: sonoff_zigbee_trv_4_thermostat_dummy
+    heater: input_boolean.trv_4_dummy_heater
+    target_sensor: input_number.trv_4_dummy_temp
+    min_temp: 4
+    max_temp: 28
+    precision: 0.1
+  # -> climate.sonoff_zigbee_trv_5_thermostat_v2_dummy  (matches the real "_v2")
+  - platform: generic_thermostat
+    name: "Sonoff Zigbee TRV 5 Thermostat v2 Dummy"
+    unique_id: sonoff_zigbee_trv_5_thermostat_v2_dummy
+    heater: input_boolean.trv_5_dummy_heater
+    target_sensor: input_number.trv_5_dummy_temp
+    min_temp: 4
+    max_temp: 28
+    precision: 0.1
+  # -> climate.sonoff_zigbee_trv_6_thermostat_dummy
+  - platform: generic_thermostat
+    name: "Sonoff Zigbee TRV 6 Thermostat Dummy"
+    unique_id: sonoff_zigbee_trv_6_thermostat_dummy
+    heater: input_boolean.trv_6_dummy_heater
+    target_sensor: input_number.trv_6_dummy_temp
+    min_temp: 4
+    max_temp: 28
+    precision: 0.1
+  # -> climate.sonoff_zigbee_trv_7_thermostat_dummy
+  - platform: generic_thermostat
+    name: "Sonoff Zigbee TRV 7 Thermostat Dummy"
+    unique_id: sonoff_zigbee_trv_7_thermostat_dummy
+    heater: input_boolean.trv_7_dummy_heater
+    target_sensor: input_number.trv_7_dummy_temp
+    min_temp: 4
+    max_temp: 28
+    precision: 0.1

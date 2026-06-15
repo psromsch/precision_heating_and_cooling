@@ -100,35 +100,34 @@ input_number:
     unit_of_measurement: "°C"
     initial: 20
 
-switch:
-  - platform: template
-    switches:
+template:
+  - switch:
       # -> switch.wifi_smart_switch_2_dummy
-      wifi_smart_switch_2_dummy:
-        friendly_name: "Wifi Smart Switch 2 Dummy"
-        icon_template: mdi:water-boiler
-        value_template: "{{ is_state('input_boolean.wifi_smart_switch_2_dummy_state', 'on') }}"
+      - name: "Wifi Smart Switch 2 Dummy"
+        unique_id: wifi_smart_switch_2_dummy
+        icon: mdi:water-boiler
+        state: "{{ is_state('input_boolean.wifi_smart_switch_2_dummy_state', 'on') }}"
         turn_on:
-          service: input_boolean.turn_on
-          target:
-            entity_id: input_boolean.wifi_smart_switch_2_dummy_state
+          - service: input_boolean.turn_on
+            target:
+              entity_id: input_boolean.wifi_smart_switch_2_dummy_state
         turn_off:
-          service: input_boolean.turn_off
-          target:
-            entity_id: input_boolean.wifi_smart_switch_2_dummy_state
+          - service: input_boolean.turn_off
+            target:
+              entity_id: input_boolean.wifi_smart_switch_2_dummy_state
       # -> switch.sonoff_zigbee_plug_3_dummy
-      sonoff_zigbee_plug_3_dummy:
-        friendly_name: "Sonoff Zigbee Plug 3 Dummy"
-        icon_template: mdi:power-socket-eu
-        value_template: "{{ is_state('input_boolean.sonoff_zigbee_plug_3_dummy_state', 'on') }}"
+      - name: "Sonoff Zigbee Plug 3 Dummy"
+        unique_id: sonoff_zigbee_plug_3_dummy
+        icon: mdi:power-socket-eu
+        state: "{{ is_state('input_boolean.sonoff_zigbee_plug_3_dummy_state', 'on') }}"
         turn_on:
-          service: input_boolean.turn_on
-          target:
-            entity_id: input_boolean.sonoff_zigbee_plug_3_dummy_state
+          - service: input_boolean.turn_on
+            target:
+              entity_id: input_boolean.sonoff_zigbee_plug_3_dummy_state
         turn_off:
-          service: input_boolean.turn_off
-          target:
-            entity_id: input_boolean.sonoff_zigbee_plug_3_dummy_state
+          - service: input_boolean.turn_off
+            target:
+              entity_id: input_boolean.sonoff_zigbee_plug_3_dummy_state
 
 climate:
   # -> climate.sonoff_zigbee_trv_1_thermostat_dummy

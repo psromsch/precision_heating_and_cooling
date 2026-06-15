@@ -5,6 +5,7 @@
   "codeowners": ["@psromsch"],
   "config_flow": true,
   "documentation": "https://github.com/psromsch/precision_heating_and_cooling",
+  "issue_tracker": "https://github.com/psromsch/precision_heating_and_cooling/issues",
   "iot_class": "local_polling",
   "integration_type": "hub",
   "dependencies": [],

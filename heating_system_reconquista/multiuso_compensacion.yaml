@@ -1,0 +1,124 @@
+###############################################################################
+# HEATING - MULTIUSO ELECTRIC HEATER
+# Complementary electric heater for Multiuso room during nighttime
+# Turns on when temp drops 0.5°C below target, off when reaching target - 0.3°C
+# Only active at night, master switch on, master pause off
+###############################################################################
+
+automation:
+  - alias: "Multiuso electric heater ON"
+    id: multiuso_electric_heater_on
+    trigger:
+      - platform: state
+        entity_id: sensor.multiuso_switchbot_cloud_temperature
+      - platform: state
+        entity_id: binary_sensor.multiuso_heating
+        to: "off"
+      - platform: state
+        entity_id: climate.trv_sonoff_multiuso_better_thermostat
+        attribute: temperature
+      - platform: time
+        at: input_datetime.night_room_end
+    condition:
+      - condition: state
+        entity_id: input_boolean.heating_master_switch
+        state: "on"
+      - condition: state
+        entity_id: input_boolean.heating_master_pause
+        state: "off"
+      - condition: state
+        entity_id: binary_sensor.multiuso_heating
+        state: "off"
+      - condition: state
+        entity_id: switch.sonoff_zigbee_plug_3
+        state: "off"
+      - condition: template
+        value_template: >
+          {% set start = states('input_datetime.night_room_start') %}
+          {% set end = states('input_datetime.night_room_end') %}
+          {% set now_time = now().strftime('%H:%M:%S') %}
+          {% if start < end %}
+            {{ not (start <= now_time < end) }}
+          {% else %}
+            {{ not (now_time >= start or now_time < end) }}
+          {% endif %}
+      - condition: template
+        value_template: >
+          {{ states('sensor.multiuso_switchbot_cloud_temperature') | float(0) 
+             <= state_attr('climate.trv_sonoff_multiuso_better_thermostat', 'temperature') | float(0) - 0.5 }}
+    action:
+      - service: switch.turn_on
+        target:
+          entity_id: switch.sonoff_zigbee_plug_3
+      - service: notify.mobile_app_romano
+        data:
+          title: "🔌 Calefacción eléctrica Multiuso ON"
+          message: "Temperatura {{ states('sensor.multiuso_switchbot_cloud_temperature') }}°C bajo target {{ state_attr('climate.trv_sonoff_multiuso_better_thermostat', 'temperature') }}°C. Enchufe encendido."
+
+  - alias: "Multiuso electric heater OFF"
+    id: multiuso_electric_heater_off
+    trigger:
+      - platform: state
+        entity_id: sensor.multiuso_switchbot_cloud_temperature
+      - platform: state
+        entity_id: binary_sensor.multiuso_heating
+        to: "on"
+    condition:
+      - condition: state
+        entity_id: switch.sonoff_zigbee_plug_3
+        state: "on"
+      - condition: or
+        conditions:
+          - condition: state
+            entity_id: binary_sensor.multiuso_heating
+            state: "on"
+          - condition: template
+            value_template: >
+              {{ states('sensor.multiuso_switchbot_cloud_temperature') | float(0) 
+                 >= state_attr('climate.trv_sonoff_multiuso_better_thermostat', 'temperature') | float(0) - 0.3 }}
+    action:
+      - service: switch.turn_off
+        target:
+          entity_id: switch.sonoff_zigbee_plug_3
+      - service: notify.mobile_app_romano
+        data:
+          title: "🔌 Calefacción eléctrica Multiuso OFF"
+          message: "Calefacción eléctrica apagada. Temperatura {{ states('sensor.multiuso_switchbot_cloud_temperature') }}°C."
+
+  - alias: "Multiuso electric heater daytime block"
+    id: multiuso_electric_heater_daytime_block
+    trigger:
+      - platform: state
+        entity_id: switch.sonoff_zigbee_plug_3
+        to: "on"
+    condition:
+      - condition: template
+        value_template: >
+          {% set start = states('input_datetime.night_room_start') %}
+          {% set end = states('input_datetime.night_room_end') %}
+          {% set now_time = now().strftime('%H:%M:%S') %}
+          {% if start < end %}
+            {{ start <= now_time < end }}
+          {% else %}
+            {{ now_time >= start or now_time < end }}
+          {% endif %}
+    action:
+      - delay:
+          seconds: 5
+      - service: switch.turn_off
+        target:
+          entity_id: switch.sonoff_zigbee_plug_3
+
+  - alias: "Multiuso electric heater morning off"
+    id: multiuso_electric_heater_morning_off
+    trigger:
+      - platform: time
+        at: "07:00:00"
+    condition:
+      - condition: state
+        entity_id: switch.sonoff_zigbee_plug_3
+        state: "on"
+    action:
+      - service: switch.turn_off
+        target:
+          entity_id: switch.sonoff_zigbee_plug_3

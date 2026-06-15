@@ -1,0 +1,54 @@
+automation:
+  - id: '1752405602254'
+    alias: 4-Calefaccion On Volviendo a Stgo de Rapel
+    description: ''
+    triggers:
+      - trigger: zone
+        entity_id: device_tracker.romano
+        zone: zone.rapel_zone
+        event: leave
+    conditions:
+      - condition: state
+        entity_id: binary_sensor.invierno
+        state: 'on'
+      - condition: state
+        entity_id: input_boolean.heating_master_switch
+        state: 'off'
+      - condition: numeric_state
+        entity_id: sensor.night_room_temperature
+        below: 19
+    actions:
+      - action: input_boolean.turn_on
+        target:
+          entity_id: input_boolean.heating_master_switch
+      - action: notify.mobile_app_romano
+        data:
+          message: "Calefacción encendida automáticamente. Saliste de Rapel zone y temperatura en casa es {{ states('sensor.night_room_temperature') }}°C"
+      - action: notify.mobile_app_mercusys_2_4
+        data:
+          message: "Calefacción encendida automáticamente. Temperatura en casa es {{ states('sensor.night_room_temperature') }}°C"
+    mode: single
+
+  - id: '1728698794283'
+    alias: 4-Calefaccion OFF saliendo Stgo
+    description: ''
+    triggers:
+      - trigger: zone
+        entity_id: device_tracker.romano
+        zone: zone.santiago
+        event: leave
+    conditions:
+      - condition: state
+        entity_id: binary_sensor.invierno
+        state: 'on'
+      - condition: state
+        entity_id: input_boolean.heating_master_switch
+        state: 'on'
+    actions:
+      - action: input_boolean.turn_off
+        target:
+          entity_id: input_boolean.heating_master_switch
+      - action: notify.mobile_app_romano
+        data:
+          message: Se apagó calefacción porque saliste de Santiago
+    mode: single

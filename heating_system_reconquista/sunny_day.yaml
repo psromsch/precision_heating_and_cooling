@@ -1,0 +1,110 @@
+###############################################################################
+# HEATING - SUNNY DAY AUTOMATION
+# Turns off master switch on sunny days
+# Resumes at 11:50 AM. Survives HA restarts via persistent input_datetime.
+###############################################################################
+
+input_datetime:
+  heating_resume_at:
+    name: "Heating Resume At"
+    has_time: true
+    has_date: true
+    icon: mdi:timer-outline
+
+input_number:
+  night_thermostat_pre_sunny_target:
+    name: "Night Thermostat Pre Sunny Target"
+    min: 5
+    max: 30
+    step: 0.5
+    unit_of_measurement: "°C"
+
+automation:
+  - alias: "Calefaccion - Dia Soleado"
+    id: calefaccion_dia_soleado
+    triggers:
+      - trigger: time
+        at: "05:50:00"
+      - trigger: time
+        at: "08:05:00"
+    conditions:
+      - condition: numeric_state
+        entity_id: sensor.sunny_hours_remaining_pirateweather_v3
+        above: 7
+      - condition: state
+        entity_id: binary_sensor.invierno
+        state: "on"
+      - condition: or
+        conditions:
+          - condition: state
+            entity_id: person.pablo
+            state: home
+          - condition: state
+            entity_id: person.pulga
+            state: home
+      - condition: state
+        entity_id: input_boolean.heating_master_switch
+        state: "on"
+      - condition: numeric_state
+        entity_id: sensor.hub_2_c8d7
+        above: 17
+      - condition: numeric_state
+        entity_id: sensor.gw3000c_outdoor_temperature
+        above: 4
+      - condition: numeric_state
+        entity_id: sensor.owmh_home_forecast0max_2
+        above: 20
+    actions:
+      - action: input_number.set_value
+        target:
+          entity_id: input_number.night_thermostat_pre_sunny_target
+        data:
+          value: "{{ state_attr('climate.night_room_virtual_thermostat', 'temperature') | float(19) }}"
+      - action: input_datetime.set_datetime
+        target:
+          entity_id: input_datetime.heating_resume_at
+        data:
+          datetime: "{{ today_at('11:50:00').isoformat() }}"
+      - action: input_boolean.turn_off
+        target:
+          entity_id: input_boolean.heating_master_switch
+      - action: notify.mobile_app_romano
+        data:
+          message: "Día soleado (máx {{ states('sensor.owmh_home_forecast0max_2') }}°C). Calefacción apagada. Se reanuda a las 11:50"
+      - action: notify.mobile_app_mercusys_2_4
+        data:
+          message: "Día soleado. Calefacción apagada, se reanuda a las 11:50"
+    mode: single
+
+  - alias: "Calefaccion - Reanudar tras día soleado"
+    id: calefaccion_reanudar_tras_dia_soleado
+    triggers:
+      - trigger: time
+        at: input_datetime.heating_resume_at
+    conditions:
+      - condition: state
+        entity_id: input_boolean.heating_master_switch
+        state: "off"
+      - condition: template
+        value_template: >
+          {{ states('input_datetime.heating_resume_at') != '2000-01-01 00:00:00'
+             and as_timestamp(states('input_datetime.heating_resume_at')) | timestamp_custom('%Y-%m-%d') == now().strftime('%Y-%m-%d') }}
+    actions:
+      - action: input_boolean.turn_on
+        target:
+          entity_id: input_boolean.heating_master_switch
+      - delay: "00:00:05"
+      - action: climate.set_temperature
+        target:
+          entity_id: climate.night_room_virtual_thermostat
+        data:
+          temperature: "{{ states('input_number.night_thermostat_pre_sunny_target') | float(19) }}"
+      - action: input_datetime.set_datetime
+        target:
+          entity_id: input_datetime.heating_resume_at
+        data:
+          datetime: "2000-01-01 00:00:00"
+      - action: notify.mobile_app_romano
+        data:
+          message: "Calefacción reanudada. Night thermostat a {{ states('input_number.night_thermostat_pre_sunny_target') }}°C, schedules activos"
+    mode: single

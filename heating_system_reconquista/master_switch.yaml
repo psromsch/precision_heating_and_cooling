@@ -1,0 +1,87 @@
+input_boolean:
+  heating_master_switch:
+    name: "Heating Master Switch"
+    icon: mdi:fire
+  heating_master_pause:
+    name: "Heating Master Pause"
+    icon: mdi:pause-circle
+
+automation:
+  - alias: "Heating master OFF"
+    id: heating_master_off
+    trigger:
+      - platform: state
+        entity_id: input_boolean.heating_master_switch
+        to: "off"
+    action:
+      - service: input_boolean.turn_on
+        target:
+          entity_id: input_boolean.night_room_thermostat_pause
+      - service: input_boolean.turn_on
+        target:
+          entity_id: input_boolean.heating_master_pause
+      - service: climate.set_temperature
+        target:
+          entity_id: climate.night_room_virtual_thermostat
+        data:
+          temperature: 5
+      - service: climate.turn_off
+        target:
+          entity_id:
+            - climate.night_room_virtual_thermostat
+            - climate.trv_sonoff_master_bedroom_better_thermostat
+            - climate.trv_sonoff_pieza_1_better_thermostat
+            - climate.trv_sonoff_pieza_2_better_thermostat_v2
+            - climate.trv_sonoff_living_comedor_better_thermostat
+            - climate.trv_sonoff_sala_juegos_better_thermostat
+            - climate.trv_sonoff_pasillo_piezas_better_thermostat
+            - climate.trv_sonoff_multiuso_better_thermostat
+
+  - alias: "Heating master ON"
+    id: heating_master_on
+    trigger:
+      - platform: state
+        entity_id: input_boolean.heating_master_switch
+        to: "on"
+    action:
+      - service: input_boolean.turn_off
+        target:
+          entity_id: input_boolean.night_room_thermostat_pause
+      - service: input_boolean.turn_off
+        target:
+          entity_id: input_boolean.heating_master_pause
+      - service: climate.set_hvac_mode
+        target:
+          entity_id:
+            - climate.night_room_virtual_thermostat
+            - climate.trv_sonoff_master_bedroom_better_thermostat
+            - climate.trv_sonoff_pieza_1_better_thermostat
+            - climate.trv_sonoff_pieza_2_better_thermostat_v2
+            - climate.trv_sonoff_living_comedor_better_thermostat
+            - climate.trv_sonoff_sala_juegos_better_thermostat
+            - climate.trv_sonoff_pasillo_piezas_better_thermostat
+            - climate.trv_sonoff_multiuso_better_thermostat
+        data:
+          hvac_mode: heat
+
+  - alias: "Heating master PAUSE"
+    id: heating_master_pause
+    trigger:
+      - platform: state
+        entity_id: input_boolean.heating_master_pause
+        to: "on"
+    action:
+      - service: input_boolean.turn_on
+        target:
+          entity_id: input_boolean.night_room_thermostat_pause
+
+  - alias: "Heating master UNPAUSE"
+    id: heating_master_unpause
+    trigger:
+      - platform: state
+        entity_id: input_boolean.heating_master_pause
+        to: "off"
+    action:
+      - service: input_boolean.turn_off
+        target:
+          entity_id: input_boolean.night_room_thermostat_pause

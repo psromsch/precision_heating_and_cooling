@@ -1,0 +1,105 @@
+###############################################################################
+# HEATING - WINDOW OPEN DETECTION
+# Uses contact sensors to turn off heating when windows are open
+# Resumes heating when both windows are closed
+###############################################################################
+
+input_boolean:
+  window_open_detected:
+    name: "Window Open Detected"
+    icon: mdi:window-open
+
+automation:
+  - alias: "Window open turn off heating"
+    id: window_open_turn_off_heating
+    trigger:
+      - platform: state
+        entity_id:
+          - binary_sensor.sonoff_open_sensor_1
+          - binary_sensor.sonoff_open_sensor_2
+        to: "on"
+        for:
+          minutes: 5
+    condition:
+      - condition: state
+        entity_id: input_boolean.heating_master_switch
+        state: "on"
+      - condition: state
+        entity_id: input_boolean.window_open_detected
+        state: "off"
+    action:
+      - service: input_boolean.turn_on
+        target:
+          entity_id: input_boolean.window_open_detected
+      - service: climate.turn_off
+        target:
+          entity_id: climate.night_room_virtual_thermostat
+      - service: notify.mobile_app_romano
+        data:
+          title: "🪟 Ventana abierta"
+          message: "Ventana abierta por más de 5 minutos. Calefacción apagada."
+
+  - alias: "Window open after restart"
+    id: window_open_after_restart
+    trigger:
+      - platform: homeassistant
+        event: start
+    condition:
+      - condition: state
+        entity_id: input_boolean.heating_master_switch
+        state: "on"
+    action:
+      - delay: "00:01:00"
+      - condition: or
+        conditions:
+          - condition: state
+            entity_id: binary_sensor.sonoff_open_sensor_1
+            state: "on"
+          - condition: state
+            entity_id: binary_sensor.sonoff_open_sensor_2
+            state: "on"
+      - service: input_boolean.turn_on
+        target:
+          entity_id: input_boolean.window_open_detected
+      - service: climate.turn_off
+        target:
+          entity_id: climate.night_room_virtual_thermostat
+      - service: notify.mobile_app_romano
+        data:
+          title: "🪟 Ventana abierta tras reinicio"
+          message: "Ventana abierta detectada después de reinicio. Calefacción apagada."
+
+  - alias: "Windows closed resume heating"
+    id: windows_closed_resume_heating
+    trigger:
+      - platform: state
+        entity_id:
+          - binary_sensor.sonoff_open_sensor_1
+          - binary_sensor.sonoff_open_sensor_2
+        to: "off"
+    condition:
+      - condition: state
+        entity_id: input_boolean.window_open_detected
+        state: "on"
+      - condition: state
+        entity_id: input_boolean.heating_master_switch
+        state: "on"
+      - condition: state
+        entity_id: binary_sensor.sonoff_open_sensor_1
+        state: "off"
+      - condition: state
+        entity_id: binary_sensor.sonoff_open_sensor_2
+        state: "off"
+    action:
+      - service: input_boolean.turn_off
+        target:
+          entity_id: input_boolean.window_open_detected
+      - service: climate.set_hvac_mode
+        target:
+          entity_id: climate.night_room_virtual_thermostat
+        data:
+          hvac_mode: heat
+      - service: notify.mobile_app_romano
+        data:
+          title: "✅ Calefacción restaurada"
+          message: "Ventanas cerradas. Calefacción encendida."

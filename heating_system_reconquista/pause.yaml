@@ -1,0 +1,10 @@
+input_boolean:
+  night_room_thermostat_pause:
+    name: "Night Room Thermostat Pause"
+    icon: mdi:pause-circle
+
+template:
+  - binary_sensor:
+      - name: "Night Room Thermostat Pause"
+        unique_id: night_room_thermostat_pause
+        state: "{{ states('input_boolean.night_room_thermostat_pause') }}"

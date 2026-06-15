@@ -1,0 +1,30 @@
+template:
+  - trigger:
+      - trigger: time_pattern
+        hours: "/1"
+      - trigger: time
+        at: "00:00:01"
+    action:
+      - action: weather.get_forecasts
+        data:
+          type: daily
+        target:
+          entity_id: weather.forecast_home
+        response_variable: weather_data
+    sensor:
+      - name: "Forecast Today Max"
+        unique_id: forecast_today_max
+        state: "{{ weather_data['weather.forecast_home'].forecast[0].temperature }}"
+        unit_of_measurement: "°C"
+      - name: "Forecast Today Min"
+        unique_id: forecast_today_min
+        state: "{{ weather_data['weather.forecast_home'].forecast[0].templow }}"
+        unit_of_measurement: "°C"
+      - name: "Forecast Tomorrow Max"
+        unique_id: forecast_tomorrow_max
+        state: "{{ weather_data['weather.forecast_home'].forecast[1].temperature }}"
+        unit_of_measurement: "°C"
+      - name: "Forecast Tomorrow Min"
+        unique_id: forecast_tomorrow_min
+        state: "{{ weather_data['weather.forecast_home'].forecast[1].templow }}"
+        unit_of_measurement: "°C"

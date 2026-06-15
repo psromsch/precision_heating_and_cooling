@@ -1,0 +1,139 @@
+###############################################################################
+# HEATING - PER ROOM HEATING STATUS
+# Binary sensor per room, ON when boiler is running AND TRV valve is open
+# Temperature-while-heating sensors for chart shading
+###############################################################################
+
+input_boolean:
+  show_heating_chart:
+    name: "Show Heating Chart"
+    icon: mdi:chart-timeline
+
+template:
+  - binary_sensor:
+      - name: "Master Bedroom Heating"
+        unique_id: master_bedroom_heating
+        device_class: heat
+        state: >
+          {{ is_state('switch.wifi_smart_switch_2', 'on')
+             and state_attr('climate.sonoff_zigbee_trv_1_thermostat', 'hvac_action') == 'heating' }}
+
+      - name: "Pieza 1 Heating"
+        unique_id: pieza_1_heating
+        device_class: heat
+        state: >
+          {{ is_state('switch.wifi_smart_switch_2', 'on')
+             and state_attr('climate.sonoff_zigbee_trv_2_thermostat', 'hvac_action') == 'heating' }}
+
+      - name: "Sala Juegos Heating"
+        unique_id: sala_juegos_heating
+        device_class: heat
+        state: >
+          {{ is_state('switch.wifi_smart_switch_2', 'on')
+             and state_attr('climate.sonoff_zigbee_trv_3_thermostat', 'hvac_action') == 'heating' }}
+
+      - name: "Comedor Heating"
+        unique_id: comedor_heating
+        device_class: heat
+        state: >
+          {{ is_state('switch.wifi_smart_switch_2', 'on')
+             and state_attr('climate.sonoff_zigbee_trv_4_thermostat', 'hvac_action') == 'heating' }}
+
+      - name: "Pieza 2 Heating"
+        unique_id: pieza_2_heating
+        device_class: heat
+        state: >
+          {{ is_state('switch.wifi_smart_switch_2', 'on')
+             and state_attr('climate.sonoff_zigbee_trv_5_thermostat_v2', 'hvac_action') == 'heating' }}
+
+      - name: "Pasillo Piezas Heating"
+        unique_id: pasillo_piezas_heating
+        device_class: heat
+        state: >
+          {{ is_state('switch.wifi_smart_switch_2', 'on')
+             and state_attr('climate.sonoff_zigbee_trv_6_thermostat', 'hvac_action') == 'heating' }}
+
+      - name: "Multiuso Heating"
+        unique_id: multiuso_heating
+        device_class: heat
+        state: >
+          {{ is_state('switch.wifi_smart_switch_2', 'on')
+             and state_attr('climate.sonoff_zigbee_trv_7_thermostat', 'hvac_action') == 'heating' }}
+
+  - sensor:
+      - name: "Master Bedroom Temp While Heating"
+        unique_id: master_bedroom_temp_while_heating
+        unit_of_measurement: "°C"
+        device_class: temperature
+        state: >
+          {% if is_state('binary_sensor.master_bedroom_heating', 'on') %}
+            {{ states('sensor.hub_2_5cc5') }}
+          {% else %}
+            unknown
+          {% endif %}
+
+      - name: "Pieza 1 Temp While Heating"
+        unique_id: pieza_1_temp_while_heating
+        unit_of_measurement: "°C"
+        device_class: temperature
+        state: >
+          {% if is_state('binary_sensor.pieza_1_heating', 'on') %}
+            {{ states('sensor.sonoff_snzb_02d_temperature') }}
+          {% else %}
+            unknown
+          {% endif %}
+
+      - name: "Pieza 2 Temp While Heating"
+        unique_id: pieza_2_temp_while_heating
+        unit_of_measurement: "°C"
+        device_class: temperature
+        state: >
+          {% if is_state('binary_sensor.pieza_2_heating', 'on') %}
+            {{ states('sensor.sonoffthermometer1_temperature') }}
+          {% else %}
+            unknown
+          {% endif %}
+
+      - name: "Living Temp While Heating"
+        unique_id: living_temp_while_heating
+        unit_of_measurement: "°C"
+        device_class: temperature
+        state: >
+          {% if is_state('binary_sensor.comedor_heating', 'on') %}
+            {{ states('sensor.hub_2_c8d7') }}
+          {% else %}
+            unknown
+          {% endif %}
+
+      - name: "Multiuso Temp While Heating"
+        unique_id: multiuso_temp_while_heating
+        unit_of_measurement: "°C"
+        device_class: temperature
+        state: >
+          {% if is_state('binary_sensor.multiuso_heating', 'on') %}
+            {{ states('sensor.multiuso_switchbot_cloud_temperature') }}
+          {% else %}
+            unknown
+          {% endif %}
+
+      - name: "Multiuso Temp While Electric Heating"
+        unique_id: multiuso_temp_while_electric_heating
+        unit_of_measurement: "°C"
+        device_class: temperature
+        state: >
+          {% if is_state('switch.sonoff_zigbee_plug_3', 'on') %}
+            {{ states('sensor.multiuso_switchbot_cloud_temperature') }}
+          {% else %}
+            unknown
+          {% endif %}
+
+      - name: "Night Thermostat Temp While Heating"
+        unique_id: night_thermostat_temp_while_heating
+        unit_of_measurement: "°C"
+        device_class: temperature
+        state: >
+          {% if is_state('switch.wifi_smart_switch_2', 'on') %}
+            {{ states('sensor.night_room_temperature') }}
+          {% else %}
+            unknown
+          {% endif %}

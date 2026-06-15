@@ -1,0 +1,89 @@
+###############################################################################
+# HEATING - RESTART SURVIVOR
+# Saves night thermostat target temperature to an input_number on every change
+# Restores it after HA restart if it differs from the saved value
+# Blocks saving during boot (2 min) and after YAML reload (unavailable check)
+###############################################################################
+
+input_number:
+  night_thermostat_saved_target:
+    name: "Night Thermostat Saved Target"
+    min: 5
+    max: 30
+    step: 0.5
+    unit_of_measurement: "°C"
+
+input_boolean:
+  ha_boot_complete:
+    name: "HA Boot Complete"
+    icon: mdi:check-circle
+
+automation:
+  - alias: "Mark boot complete after 2 minutes"
+    id: mark_boot_complete_after_2_minutes
+    trigger:
+      - platform: homeassistant
+        event: start
+    action:
+      - service: input_boolean.turn_off
+        target:
+          entity_id: input_boolean.ha_boot_complete
+      - delay: "00:02:00"
+      - service: input_boolean.turn_on
+        target:
+          entity_id: input_boolean.ha_boot_complete
+
+  - alias: "Save night thermostat target"
+    id: save_night_thermostat_target
+    trigger:
+      - platform: state
+        entity_id: climate.night_room_virtual_thermostat
+        attribute: temperature
+    condition:
+      - condition: state
+        entity_id: input_boolean.ha_boot_complete
+        state: "on"
+      - condition: template
+        value_template: >
+          {{ trigger.to_state.attributes.temperature is not none
+             and trigger.to_state.attributes.temperature != 'unavailable'
+             and trigger.to_state.attributes.temperature != 'unknown'
+             and trigger.to_state.attributes.temperature | float(0) > 0
+             and trigger.to_state.attributes.temperature != trigger.from_state.attributes.temperature }}
+      - condition: template
+        value_template: >
+          {{ trigger.from_state.state != 'unavailable' }}
+      - condition: state
+        entity_id: input_boolean.heating_master_pause
+        state: "off"
+    action:
+      - service: input_number.set_value
+        target:
+          entity_id: input_number.night_thermostat_saved_target
+        data:
+          value: "{{ trigger.to_state.attributes.temperature | float }}"
+
+  - alias: "Restore night thermostat target after restart"
+    id: restore_night_thermostat_target_after_restart
+    trigger:
+      - platform: homeassistant
+        event: start
+    condition:
+      - condition: state
+        entity_id: input_boolean.heating_master_switch
+        state: "on"
+    action:
+      - delay: "00:01:00"
+      - condition: template
+        value_template: >
+          {{ state_attr('climate.night_room_virtual_thermostat', 'temperature') | float
+             != states('input_number.night_thermostat_saved_target') | float }}
+      - service: climate.set_temperature
+        target:
+          entity_id: climate.night_room_virtual_thermostat
+        data:
+          temperature: "{{ states('input_number.night_thermostat_saved_target') | float }}"
+      - service: notify.mobile_app_romano
+        data:
+          title: "🔄 Target restaurado"
+          message: "Night thermostat restaurado a {{ states('input_number.night_thermostat_saved_target') }}°C (HA había puesto {{ state_attr('climate.night_room_virtual_thermostat', 'temperature') }}°C)"

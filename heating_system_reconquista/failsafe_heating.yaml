@@ -1,0 +1,82 @@
+automation:
+  - alias: "Alerta sobrecalentamiento night room"
+    id: alerta_sobrecalentamiento_night_room
+    trigger:
+      - platform: numeric_state
+        entity_id: sensor.night_room_temperature
+        above: 24
+    condition:
+      - condition: state
+        entity_id: switch.wifi_smart_switch_2
+        state: "on"
+    action:
+      - service: persistent_notification.create
+        data:
+          title: "⚠️ Alerta Calefacción"
+          message: "La temperatura del night room superó 24°C y la calefacción sigue encendida"
+          notification_id: "alerta_sobrecalentamiento_night_room"
+
+  - alias: "Alerta calefacción continua prolongada"
+    id: alerta_calefaccion_continua_prolongada
+    trigger:
+      - platform: state
+        entity_id: switch.wifi_smart_switch_2
+        to: "on"
+        for:
+          hours: 3
+    action:
+      - service: notify.mobile_app_romano
+        data:
+          title: "⚠️ Calefacción Prolongada"
+          message: >
+            La calefacción lleva más de 3 horas encendida continuamente.
+
+  - alias: "Enforce master OFF on night thermostat"
+    id: enforce_master_off_on_night_thermostat
+    trigger:
+      - platform: state
+        entity_id: climate.night_room_virtual_thermostat
+        to: "heat"
+    condition:
+      - condition: or
+        conditions:
+          - condition: state
+            entity_id: input_boolean.heating_master_switch
+            state: "off"
+          - condition: state
+            entity_id: input_boolean.heating_master_pause
+            state: "on"
+          - condition: state
+            entity_id: input_boolean.window_open_detected
+            state: "on"
+    action:
+      - service: climate.turn_off
+        target:
+          entity_id: climate.night_room_virtual_thermostat
+
+  - alias: "Failsafe boiler on while master off"
+    id: failsafe_boiler_on_while_master_off
+    trigger:
+      - platform: state
+        entity_id: switch.wifi_smart_switch_2
+        to: "on"
+    condition:
+      - condition: or
+        conditions:
+          - condition: state
+            entity_id: input_boolean.heating_master_switch
+            state: "off"
+          - condition: state
+            entity_id: input_boolean.heating_master_pause
+            state: "on"
+          - condition: state
+            entity_id: input_boolean.window_open_detected
+            state: "on"
+    action:
+      - service: switch.turn_off
+        target:
+          entity_id: switch.wifi_smart_switch_2
+      - service: notify.mobile_app_romano
+        data:
+          title: "🚨 Boiler encendido sin autorización"
+          message: "El boiler se encendió pero el master switch está apagado o pausado. Se apagó automáticamente."

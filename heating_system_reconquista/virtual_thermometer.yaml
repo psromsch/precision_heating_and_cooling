@@ -1,0 +1,90 @@
+input_select:
+  night_room_sensor:
+    name: "Night Room Sensor"
+    options:
+      - Master Bedroom
+      - Pieza 2
+      - Living Room
+      - Pieza 1
+      - Pasillo Piezas
+      - Multiuso
+    initial: Pieza 1
+    icon: mdi:thermometer
+
+input_datetime:
+  night_room_start:
+    name: "Night Room Day Start"
+    has_time: true
+    has_date: false
+  night_room_end:
+    name: "Night Room Day End"
+    has_time: true
+    has_date: false
+
+template:
+  - sensor:
+      - name: "Night Room Temperature"
+        unique_id: night_room_temperature
+        unit_of_measurement: "°C"
+        device_class: temperature
+        state_class: measurement
+        state: >
+          {% set start = states('input_datetime.night_room_start') %}
+          {% set end = states('input_datetime.night_room_end') %}
+          {% set now_time = now().strftime('%H:%M:%S') %}
+          {% if start < end %}
+            {% set is_day = start <= now_time < end %}
+          {% else %}
+            {% set is_day = now_time >= start or now_time < end %}
+          {% endif %}
+          {% if is_day %}
+            {% set val = states('sensor.hub_2_c8d7') %}
+          {% else %}
+            {% set map = {
+              'Master Bedroom': 'sensor.hub_2_5cc5',
+              'Pieza 2': 'sensor.sonoffthermometer1_temperature',
+              'Living Room': 'sensor.hub_2_c8d7',
+              'Pieza 1': 'sensor.sonoff_snzb_02d_temperature',
+              'Pasillo Piezas': 'sensor.sonoff_snzb_02d_temperature',
+              'Multiuso': 'sensor.multiuso_switchbot_cloud_temperature'
+            } %}
+            {% set val = states(map[states('input_select.night_room_sensor')]) %}
+          {% endif %}
+          {% if val in [None, 'unavailable', 'unknown'] %}
+            {{ this.state if this.state not in ['unavailable', 'unknown'] else 'unavailable' }}
+          {% else %}
+            {{ val }}
+          {% endif %}
+
+      - name: "Night Room Humidity"
+        unique_id: night_room_humidity
+        unit_of_measurement: "%"
+        device_class: humidity
+        state_class: measurement
+        state: >
+          {% set start = states('input_datetime.night_room_start') %}
+          {% set end = states('input_datetime.night_room_end') %}
+          {% set now_time = now().strftime('%H:%M:%S') %}
+          {% if start < end %}
+            {% set is_day = start <= now_time < end %}
+          {% else %}
+            {% set is_day = now_time >= start or now_time < end %}
+          {% endif %}
+          {% if is_day %}
+            {% set val = states('sensor.hub_2_c8d7_humidity') %}
+          {% else %}
+            {% set map = {
+              'Master Bedroom': 'sensor.hub_2_5cc5_humidity',
+              'Pieza 2': 'sensor.sonoffthermometer1_humidity',
+              'Living Room': 'sensor.hub_2_c8d7_humidity',
+              'Pieza 1': 'sensor.sonoff_snzb_02d_humidity',
+              'Pasillo Piezas': 'sensor.sonoff_snzb_02d_humidity',
+              'Multiuso': 'sensor.multiuso_switchbot_cloud_humidity'
+            } %}
+            {% set val = states(map[states('input_select.night_room_sensor')]) %}
+          {% endif %}
+          {% if val in [None, 'unavailable', 'unknown'] %}
+            {{ this.state if this.state not in ['unavailable', 'unknown'] else 'unavailable' }}
+          {% else %}
+            {{ val }}
+          {% endif %}

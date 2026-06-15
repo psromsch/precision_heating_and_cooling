@@ -1,0 +1,15 @@
+climate:
+  - platform: generic_thermostat
+    name: "Night Room Virtual Thermostat"
+    unique_id: night_room_virtual_thermostat
+    heater: switch.wifi_smart_switch_2
+    target_sensor: sensor.night_room_temperature
+    min_temp: 5
+    max_temp: 25
+    cold_tolerance: 0.3
+    hot_tolerance: 0.1
+    keep_alive:
+      minutes: 5
+    away_temp: 15
+    comfort_temp: 21
+    eco_temp: 18

@@ -1,0 +1,191 @@
+automation:
+  - alias: "Failsafe TRV setpoint too low"
+    id: failsafe_trv_setpoint_too_low
+    trigger:
+      - platform: state
+        entity_id: climate.night_room_virtual_thermostat
+        attribute: hvac_action
+        to: "heating"
+        for:
+          minutes: 10
+    condition:
+      - condition: state
+        entity_id: input_boolean.heating_master_switch
+        state: "on"
+      - condition: template
+        value_template: >
+          {% set start = states('input_datetime.night_room_start') %}
+          {% set end = states('input_datetime.night_room_end') %}
+          {% set now_time = now().strftime('%H:%M:%S') %}
+          {% if start < end %}
+            {% set is_day = start <= now_time < end %}
+          {% else %}
+            {% set is_day = now_time >= start or now_time < end %}
+          {% endif %}
+          {% set thermostat_target = state_attr('climate.night_room_virtual_thermostat', 'temperature') | float(0) %}
+          {% set margin = thermostat_target + 3 %}
+          {% if is_day %}
+            {% set trv3 = state_attr('climate.sonoff_zigbee_trv_3_thermostat', 'temperature') | float(0) %}
+            {% set trv4 = state_attr('climate.sonoff_zigbee_trv_4_thermostat', 'temperature') | float(0) %}
+            {{ trv3 < margin and trv4 < margin }}
+          {% else %}
+            {% set room = states('input_select.night_room_sensor') %}
+            {% if room == 'Master Bedroom' %}
+              {% set trv1 = state_attr('climate.sonoff_zigbee_trv_1_thermostat', 'temperature') | float(0) %}
+              {{ trv1 < margin }}
+            {% elif room == 'Pieza 1' %}
+              {% set trv2 = state_attr('climate.sonoff_zigbee_trv_2_thermostat', 'temperature') | float(0) %}
+              {{ trv2 < margin }}
+            {% elif room == 'Pieza 2' %}
+              {% set trv5 = state_attr('climate.sonoff_zigbee_trv_5_thermostat_v2', 'temperature') | float(0) %}
+              {{ trv5 < margin }}
+            {% elif room == 'Pasillo Piezas' %}
+              {% set trv6 = state_attr('climate.sonoff_zigbee_trv_6_thermostat', 'temperature') | float(0) %}
+              {{ trv6 < margin }}
+            {% elif room == 'Multiuso' %}
+              {% set trv7 = state_attr('climate.sonoff_zigbee_trv_7_thermostat', 'temperature') | float(0) %}
+              {{ trv7 < margin }}
+            {% elif room == 'Living Room' %}
+              {% set trv3 = state_attr('climate.sonoff_zigbee_trv_3_thermostat', 'temperature') | float(0) %}
+              {% set trv4 = state_attr('climate.sonoff_zigbee_trv_4_thermostat', 'temperature') | float(0) %}
+              {{ trv3 < margin and trv4 < margin }}
+            {% else %}
+              false
+            {% endif %}
+          {% endif %}
+    action:
+      - service: notify.mobile_app_romano
+        data:
+          title: "⚠️ TRV setpoint bajo"
+          message: >
+            La calefacción lleva 10 min encendida pero los TRV de la habitación
+            monitoreada tienen un setpoint inferior a
+            {{ state_attr('climate.night_room_virtual_thermostat', 'temperature') | float(0) + 3 }}°C
+            (objetivo + 3°C de margen).
+            La calefacción no logrará su objetivo.
+
+  - alias: "Failsafe TRV unresponsive"
+    id: failsafe_trv_unresponsive
+    trigger:
+      - platform: state
+        entity_id: switch.wifi_smart_switch_2
+        to: "on"
+        for:
+          minutes: 45
+    condition:
+      - condition: state
+        entity_id: input_boolean.heating_master_switch
+        state: "on"
+      - condition: template
+        value_template: >
+          {% set start = today_at(states('input_datetime.night_room_start')) %}
+          {% set end = today_at(states('input_datetime.night_room_end')) %}
+          {% set n = now() %}
+          {% set margin = timedelta(minutes=50) %}
+          {{ (n - start).total_seconds() | abs > margin.total_seconds()
+             and (n - end).total_seconds() | abs > margin.total_seconds() }}
+      - condition: template
+        value_template: >
+          {% set current = states('sensor.night_room_temperature') | float(0) %}
+          {% set fortyfive_min_ago = states('sensor.night_room_temperature', now() - timedelta(minutes=45)) | float(0) %}
+          {% set temp_rise = current - fortyfive_min_ago %}
+          {{ temp_rise < 0.5 }}
+    action:
+      - service: notify.mobile_app_romano
+        data:
+          title: "🚨 Calefacción sin efecto"
+          message: >
+            El boiler lleva 45 min encendido pero la temperatura solo subió
+            {{ (states('sensor.night_room_temperature') | float(0) -
+               states('sensor.night_room_temperature', now() - timedelta(minutes=45)) | float(0)) | round(1) }}°C.
+            Posible TRV no respondiendo o ventana abierta.
+
+  - alias: "Failsafe TRV unavailable"
+    id: failsafe_trv_unavailable
+    trigger:
+      - platform: state
+        entity_id:
+          - climate.sonoff_zigbee_trv_1_thermostat
+          - climate.sonoff_zigbee_trv_2_thermostat
+          - climate.sonoff_zigbee_trv_3_thermostat
+          - climate.sonoff_zigbee_trv_4_thermostat
+          - climate.sonoff_zigbee_trv_5_thermostat_v2
+          - climate.sonoff_zigbee_trv_6_thermostat
+          - climate.sonoff_zigbee_trv_7_thermostat
+        to: "unavailable"
+        for:
+          minutes: 15
+    condition:
+      - condition: state
+        entity_id: input_boolean.heating_master_switch
+        state: "on"
+      - condition: template
+        value_template: >
+          {{ state_attr('climate.night_room_virtual_thermostat', 'hvac_action') == 'heating' }}
+    action:
+      - service: notify.mobile_app_romano
+        data:
+          title: "🚨 TRV no disponible"
+          message: >
+            {% set names = {
+              'climate.sonoff_zigbee_trv_1_thermostat': 'Master Bedroom',
+              'climate.sonoff_zigbee_trv_2_thermostat': 'Pieza 1',
+              'climate.sonoff_zigbee_trv_3_thermostat': 'Sala Juegos',
+              'climate.sonoff_zigbee_trv_4_thermostat': 'Comedor',
+              'climate.sonoff_zigbee_trv_5_thermostat_v2': 'Pieza 2',
+              'climate.sonoff_zigbee_trv_6_thermostat': 'Pasillo Piezas',
+              'climate.sonoff_zigbee_trv_7_thermostat': 'Multiuso'
+            } %}
+            TRV {{ names.get(trigger.entity_id, trigger.to_state.name) }} lleva 15 min no disponible
+            mientras la calefacción está encendida.
+
+  - alias: "Failsafe TRV health check"
+    id: failsafe_trv_health_check
+    triggers:
+      - trigger: time
+        at: "21:00:00"
+    conditions:
+      - condition: state
+        entity_id: input_boolean.heating_master_switch
+        state: "on"
+    actions:
+      - variables:
+          trvs:
+            - entity: switch.sonoff_zigbee_trv_1_child_lock
+              name: "Master Bedroom"
+            - entity: switch.sonoff_zigbee_trv_2_child_lock
+              name: "Pieza 1"
+            - entity: switch.sonoff_zigbee_trv_3_child_lock
+              name: "Sala Juegos"
+            - entity: switch.sonoff_zigbee_trv_4_child_lock
+              name: "Comedor"
+            - entity: switch.sonoff_zigbee_trv_5_child_lock_v2
+              name: "Pieza 2"
+            - entity: switch.sonoff_zigbee_trv_6_child_lock
+              name: "Pasillo Piezas"
+            - entity: switch.sonoff_zigbee_trv_7_child_lock
+              name: "Multiuso"
+      - repeat:
+          for_each: "{{ trvs }}"
+          sequence:
+            - variables:
+                original_state: "{{ states(repeat.item.entity) }}"
+                new_state: "{{ 'off' if original_state == 'on' else 'on' }}"
+            - action: "switch.turn_{{ new_state }}"
+              target:
+                entity_id: "{{ repeat.item.entity }}"
+            - delay:
+                seconds: 30
+            - if:
+                - condition: template
+                  value_template: "{{ states(repeat.item.entity) != new_state }}"
+              then:
+                - action: notify.mobile_app_romano
+                  data:
+                    title: "⚠️ TRV no responde"
+                    message: "{{ repeat.item.name }} no respondió al health check. Child lock no cambió después de 30 segundos."
+              else:
+                - action: "switch.turn_{{ original_state }}"
+                  target:
+                    entity_id: "{{ repeat.item.entity }}"
+    mode: single

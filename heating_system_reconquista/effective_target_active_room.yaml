@@ -1,0 +1,48 @@
+###############################################################################
+# HEATING - EFFECTIVE TARGET TEMPERATURE PER ROOM
+# Shows the actual controlling target for each room:
+# - Living: night thermostat target during day, Better Thermostat during night
+# - Pieza 1: night thermostat target during night (when selected), Better
+#   Thermostat during day
+# - All other rooms: always their own Better Thermostat target
+###############################################################################
+
+template:
+  - sensor:
+      - name: "Living Effective Target"
+        unique_id: living_effective_target
+        unit_of_measurement: "°C"
+        device_class: temperature
+        state: >
+          {% set start = states('input_datetime.night_room_start') %}
+          {% set end = states('input_datetime.night_room_end') %}
+          {% set now_time = now().strftime('%H:%M:%S') %}
+          {% if start < end %}
+            {% set is_day = start <= now_time < end %}
+          {% else %}
+            {% set is_day = now_time >= start or now_time < end %}
+          {% endif %}
+          {% if is_day %}
+            {{ state_attr('climate.night_room_virtual_thermostat', 'temperature') }}
+          {% else %}
+            {{ state_attr('climate.trv_sonoff_living_comedor_better_thermostat', 'temperature') }}
+          {% endif %}
+
+      - name: "Pieza 1 Effective Target"
+        unique_id: pieza_1_effective_target
+        unit_of_measurement: "°C"
+        device_class: temperature
+        state: >
+          {% set start = states('input_datetime.night_room_start') %}
+          {% set end = states('input_datetime.night_room_end') %}
+          {% set now_time = now().strftime('%H:%M:%S') %}
+          {% if start < end %}
+            {% set is_day = start <= now_time < end %}
+          {% else %}
+            {% set is_day = now_time >= start or now_time < end %}
+          {% endif %}
+          {% if not is_day and states('input_select.night_room_sensor') == 'Pieza 1' %}
+            {{ state_attr('climate.night_room_virtual_thermostat', 'temperature') }}
+          {% else %}
+            {{ state_attr('climate.trv_sonoff_pieza_1_better_thermostat', 'temperature') }}
+          {% endif %}

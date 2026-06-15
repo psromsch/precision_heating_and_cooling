@@ -88,6 +88,13 @@ class PrecisionClimateCoordinator:
         self._unsubs: list = []
         self._boundary_unsub = None
 
+        # Entity update callbacks (registered by entities, fired after each cycle).
+        self._listeners: list = []
+
+        # Latest schedule-resolved snapshot, exposed to sensor entities.
+        self.resolved_targets: dict[str, float] = {}
+        self.resolved_active: dict[str, bool] = {}
+
         # Failsafe timers.
         self._prolonged = SustainedCondition(PROLONGED_HEATING_SECONDS)
         self._mismatch = {r.room_id: SustainedCondition(TRV_MISMATCH_SECONDS) for r in self.config.rooms}
@@ -125,6 +132,23 @@ class PrecisionClimateCoordinator:
             self._boundary_unsub = None
 
     # --- Triggers ------------------------------------------------------------
+
+    @callback
+    def async_add_listener(self, update_callback) -> "callback":
+        """Register an entity update callback; returns an unsubscribe function."""
+        self._listeners.append(update_callback)
+
+        @callback
+        def _remove() -> None:
+            if update_callback in self._listeners:
+                self._listeners.remove(update_callback)
+
+        return _remove
+
+    @callback
+    def _notify_listeners(self) -> None:
+        for update_callback in list(self._listeners):
+            update_callback()
 
     @callback
     def _handle_state_event(self, event: Event) -> None:
@@ -213,6 +237,8 @@ class PrecisionClimateCoordinator:
             self.config.schedules, weekday, minute, self.config.default_room
         )
         resolved_by_id = {r.room_id: r for r in resolved}
+        self.resolved_targets = {r.room_id: r.target for r in resolved}
+        self.resolved_active = {r.room_id: r.is_active for r in resolved}
 
         sunny_active, sunny_target = self._evaluate_sunny_day(minute)
 
@@ -247,6 +273,7 @@ class PrecisionClimateCoordinator:
 
         await self._apply(decision, rooms, resolved_by_id)
         self._run_failsafes(mono, rooms, resolved_by_id)
+        self._notify_listeners()
 
     async def _apply(self, decision, rooms, resolved_by_id) -> None:
         """Execute the decision via HA services and update commanded state."""

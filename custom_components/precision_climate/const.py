@@ -39,3 +39,12 @@ def force_flow_setpoint(mode: Mode) -> float:
 def block_flow_setpoint(mode: Mode) -> float:
     """Return the TRV setpoint that fully closes the valve for the given mode."""
     return TRV_BLOCK_FLOW_HEAT if mode is Mode.HEAT else TRV_BLOCK_FLOW_COOL
+
+
+# --- Failsafe default thresholds (seconds / degrees) -------------------------
+PROLONGED_HEATING_SECONDS = 5 * 60 * 60        # 5 hours of continuous boiler run
+TRV_MISMATCH_SECONDS = 10 * 60                 # boiler on 10 min with wrong TRV target
+TRV_UNRESPONSIVE_SECONDS = 45 * 60             # boiler on 45 min, temp barely rises
+TRV_UNRESPONSIVE_MIN_RISE = 0.5                # minimum acceptable rise over the window
+TRV_UNAVAILABLE_SECONDS = 15 * 60              # TRV offline 15 min while heating
+DEFAULT_OVERHEAT_THRESHOLD = 24.0              # absolute °C overheat alert

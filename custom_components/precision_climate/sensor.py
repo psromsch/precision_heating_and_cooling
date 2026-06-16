@@ -59,6 +59,8 @@ class SystemStatusSensor(PrecisionBaseEntity, SensorEntity):
             "master_on": c.master_on,
             "paused": c.paused,
             "rooms": rooms,
+            # Consumed by the visual schedule card to render/edit schedules.
+            "schedules": c.schedule_payload(),
         }
 
 

@@ -249,7 +249,9 @@ class PrecisionClimateOptionsFlow(config_entries.OptionsFlow):
 
     async def async_step_add_room(self, user_input: dict | None = None):
         self._ensure_loaded()
-        self._editing_id = None
+        if user_input is None:
+            # Fresh "add" only; on submit we must keep any editing id intact.
+            self._editing_id = None
         return await self._room_form(user_input)
 
     async def _room_form(self, user_input: dict | None, defaults: dict | None = None):
@@ -266,6 +268,16 @@ class PrecisionClimateOptionsFlow(config_entries.OptionsFlow):
             elif room_id in existing:
                 errors["base"] = "duplicate_room"
             else:
+                # Preserve the existing schedule (if editing) so the schedule
+                # editor pre-fills, unless the schedule mode changed.
+                prev = next(
+                    (r for r in self._rooms if r[CONF_ROOM_ID] == self._editing_id), {}
+                )
+                keep_blocks = (
+                    prev.get(CONF_SCHEDULE_BLOCKS, {})
+                    if prev.get(CONF_SCHEDULE_MODE) == user_input[CONF_SCHEDULE_MODE]
+                    else {}
+                )
                 self._current_room = {
                     CONF_ROOM_ID: room_id,
                     CONF_ROOM_NAME: name,
@@ -275,6 +287,7 @@ class PrecisionClimateOptionsFlow(config_entries.OptionsFlow):
                     CONF_LOWER_HYSTERESIS: lower,
                     CONF_UPPER_HYSTERESIS: upper,
                     CONF_SCHEDULE_MODE: user_input[CONF_SCHEDULE_MODE],
+                    CONF_SCHEDULE_BLOCKS: keep_blocks,
                 }
                 return await self.async_step_schedule()
 
@@ -429,14 +442,19 @@ class PrecisionClimateOptionsFlow(config_entries.OptionsFlow):
         schema_dict[
             vol.Optional(CONF_NOTIFY_SERVICES, default=self._notify_services)
         ] = _notify_services_selector(self.hass)
+        # EntitySelector rejects an empty-string default, so only set a default
+        # when a forecast entity was actually configured.
+        forecast = self._sunny.get(CONF_SUNNY_FORECAST_ENTITY)
+        forecast_key = (
+            vol.Optional(CONF_SUNNY_FORECAST_ENTITY, default=forecast)
+            if forecast
+            else vol.Optional(CONF_SUNNY_FORECAST_ENTITY)
+        )
         schema_dict.update({
             vol.Required(
                 CONF_SUNNY_ENABLED, default=self._sunny.get(CONF_SUNNY_ENABLED, False)
             ): bool,
-            vol.Optional(
-                CONF_SUNNY_FORECAST_ENTITY,
-                default=self._sunny.get(CONF_SUNNY_FORECAST_ENTITY, ""),
-            ): _entity_picker("sensor"),
+            forecast_key: _entity_picker("sensor"),
             vol.Optional(
                 CONF_SUNNY_MIN_HOURS, default=self._sunny.get(CONF_SUNNY_MIN_HOURS, 7)
             ): selector.NumberSelector(

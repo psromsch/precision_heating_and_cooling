@@ -99,7 +99,7 @@ def _hysteresis_number():
 def _temp_number():
     return selector.NumberSelector(
         selector.NumberSelectorConfig(
-            min=5.0, max=25.0, step=0.5, mode="box", unit_of_measurement="°C"
+            min=5.0, max=25.0, step=0.1, mode="box", unit_of_measurement="°C"
         )
     )
 

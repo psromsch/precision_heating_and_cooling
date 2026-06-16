@@ -40,6 +40,7 @@ from .const import (
     DEFAULT_OVERHEAT_THRESHOLD,
     DOMAIN,
     Mode,
+    PAUSE_TARGET,
     PROLONGED_HEATING_SECONDS,
     TRV_MISMATCH_SECONDS,
     TRV_UNAVAILABLE_SECONDS,
@@ -75,6 +76,9 @@ class PrecisionClimateCoordinator:
         # User-facing master controls (mutated by the master switch / pause entities).
         self.master_on: bool = True
         self.paused: bool = False
+        # Per-room pause: paused rooms get their target dropped to PAUSE_TARGET
+        # until resumed. Set is seeded by the per-room pause switches on restore.
+        self._room_paused: set[str] = set()
 
         # Commanded state (what we last told HA to do).
         self._boiler_on: bool = False
@@ -269,6 +273,11 @@ class PrecisionClimateCoordinator:
             self.config.schedules, weekday, minute, self.config.default_room
         )
         resolved_by_id = {r.room_id: r for r in resolved}
+        # Paused rooms have their effective target dropped so they stop calling
+        # for heat. The stored schedule is untouched, so resume restores it.
+        for r in resolved:
+            if r.room_id in self._room_paused:
+                r.target = PAUSE_TARGET
         self.resolved_targets = {r.room_id: r.target for r in resolved}
         self.resolved_active = {r.room_id: r.is_active for r in resolved}
 
@@ -430,6 +439,16 @@ class PrecisionClimateCoordinator:
 
     async def async_set_paused(self, paused: bool) -> None:
         self.paused = paused
+        await self.async_evaluate()
+
+    def room_paused(self, room_id: str) -> bool:
+        return room_id in self._room_paused
+
+    async def async_set_room_paused(self, room_id: str, paused: bool) -> None:
+        if paused:
+            self._room_paused.add(room_id)
+        else:
+            self._room_paused.discard(room_id)
         await self.async_evaluate()
 
     @property

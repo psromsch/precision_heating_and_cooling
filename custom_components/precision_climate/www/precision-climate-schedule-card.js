@@ -30,7 +30,7 @@ const DAY_ORDER = ["all", "weekday", "weekend", "mon", "tue", "wed", "thu", "fri
 
 // Shown in the card footer so you can confirm which card version is live
 // after a HACS update (keep in sync with manifest.json).
-const CARD_VERSION = "0.2.5";
+const CARD_VERSION = "0.2.6";
 
 const pad = (n) => String(n).padStart(2, "0");
 const minToHHMM = (m) => {
@@ -211,8 +211,27 @@ class PrecisionClimateScheduleCard extends HTMLElement {
       });
     });
 
+    this._body.querySelectorAll("[data-pause]").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const [rid, flag] = btn.getAttribute("data-pause").split("|");
+        this._setPause(rid, flag === "1");
+      });
+    });
+
     // Position needle immediately after render.
     this._updateTimeLine();
+  }
+
+  async _setPause(roomId, paused) {
+    try {
+      await this._hass.callService("precision_climate", "set_room_pause", {
+        room_id: roomId,
+        paused,
+      });
+    } catch (err) {
+      this._error = (err && err.message) || "Could not change pause state.";
+      this._render();
+    }
   }
 
   _renderBoilerStatus(boilerOn, reason) {
@@ -231,6 +250,9 @@ class PrecisionClimateScheduleCard extends HTMLElement {
 
     const heatIcon = heating ? `<span class="pcs-heat-icon" title="Heating">🔥</span>` : "";
     const tempSpan = temp ? `<span class="pcs-cur-temp">(${temp})</span>` : "";
+    const paused = !!info.paused;
+    const pausedBadge = paused ? `<span class="pcs-paused-badge">paused</span>` : "";
+    const pauseBtn = `<button class="pcs-btn pcs-pause-btn ${paused ? "pcs-resume" : ""}" data-pause="${room.room_id}|${paused ? "0" : "1"}" title="${paused ? "Resume room" : "Pause room (target 5°C until resumed)"}">${paused ? "▶ Resume" : "⏸ Pause"}</button>`;
 
     const dayKeys = Object.keys(room.blocks).sort(
       (a, b) => DAY_ORDER.indexOf(a) - DAY_ORDER.indexOf(b)
@@ -267,8 +289,11 @@ class PrecisionClimateScheduleCard extends HTMLElement {
       })
       .join("");
 
-    return `<div class="pcs-room">
-      <div class="pcs-room-name">${room.name}${heatIcon}${tempSpan}</div>
+    return `<div class="pcs-room${paused ? " pcs-room-paused" : ""}">
+      <div class="pcs-room-name">
+        <span class="pcs-room-name-text">${room.name}${heatIcon}${tempSpan}${pausedBadge}</span>
+        ${pauseBtn}
+      </div>
       ${days}
     </div>`;
   }
@@ -339,9 +364,25 @@ class PrecisionClimateScheduleCard extends HTMLElement {
     });
     this._body.querySelector(".pcs-add").addEventListener("click", () => {
       this._syncEditorFromDom();
-      const last = this._edit.blocks[this._edit.blocks.length - 1];
-      const start = last ? last.end_min : 0;
-      this._edit.blocks.push({ start_min: start, end_min: 1440, target: 20, is_active: false });
+      const blocks = this._edit.blocks;
+      const last = blocks[blocks.length - 1];
+      if (last) {
+        // Split the last block in half so the day stays fully covered and the
+        // new boundary is editable (appending at 24:00 left a 0-width block
+        // that couldn't be sub-partitioned).
+        const lastEnd = last.end_min == null ? 1440 : last.end_min;
+        const mid = Math.round((last.start_min + lastEnd) / 2);
+        if (mid > last.start_min && mid < lastEnd) {
+          const newBlock = { start_min: mid, end_min: lastEnd, target: last.target, is_active: last.is_active };
+          last.end_min = mid;
+          blocks.push(newBlock);
+        } else {
+          // Last block too small to split; append a fallback block.
+          blocks.push({ start_min: lastEnd, end_min: 1440, target: 20, is_active: false });
+        }
+      } else {
+        blocks.push({ start_min: 0, end_min: 1440, target: 20, is_active: false });
+      }
       this._render();
     });
     this._body.querySelectorAll(".pcs-del").forEach((btn) => {
@@ -366,9 +407,14 @@ const STYLE = `
 
   /* Room header */
   .pcs-room { margin-bottom: 18px; }
-  .pcs-room-name { font-weight: 600; font-size: 1.05em; margin: 6px 0; display: flex; align-items: center; gap: 5px; }
+  .pcs-room-name { font-weight: 600; font-size: 1.05em; margin: 6px 0; display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+  .pcs-room-name-text { display: flex; align-items: center; gap: 5px; }
   .pcs-heat-icon { font-size: 1em; line-height: 1; }
   .pcs-cur-temp { font-weight: 400; font-size: .95em; opacity: .8; }
+  .pcs-paused-badge { font-weight: 600; font-size: .7em; text-transform: uppercase; letter-spacing: .04em; padding: 1px 6px; border-radius: 8px; background: var(--warning-color, #d9a13b); color: #1c1c1c; }
+  .pcs-pause-btn { white-space: nowrap; }
+  .pcs-pause-btn.pcs-resume { border-color: var(--warning-color, #d9a13b); color: var(--warning-color, #d9a13b); }
+  .pcs-room-paused .pcs-timeline { opacity: .5; }
 
   /* Day row */
   .pcs-day-head { display: flex; align-items: center; justify-content: space-between; font-size: .95em; opacity: .85; margin-top: 6px; }

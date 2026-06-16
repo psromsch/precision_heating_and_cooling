@@ -32,3 +32,25 @@ set_schedule:
          {"start_min": 480, "end_min": 1440, "target": 21, "is_active": true}]
       selector:
         object:
+
+set_room_pause:
+  name: Pause or resume a room
+  description: >
+    Pause a room (drops its effective target so it stops calling for heat
+    until resumed) or resume it. The stored schedule is untouched. Used by the
+    visual schedule card's pause button.
+  fields:
+    room_id:
+      name: Room ID
+      description: The room's id (slug), e.g. living.
+      required: true
+      example: living
+      selector:
+        text:
+    paused:
+      name: Paused
+      description: true to pause, false to resume.
+      required: true
+      example: true
+      selector:
+        boolean:

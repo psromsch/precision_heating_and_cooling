@@ -30,7 +30,7 @@ const DAY_ORDER = ["all", "weekday", "weekend", "mon", "tue", "wed", "thu", "fri
 
 // Shown in the card footer so you can confirm which card version is live
 // after a HACS update (keep in sync with manifest.json).
-const CARD_VERSION = "0.2.3";
+const CARD_VERSION = "0.2.4";
 
 const pad = (n) => String(n).padStart(2, "0");
 const minToHHMM = (m) => {
@@ -289,7 +289,7 @@ class PrecisionClimateScheduleCard extends HTMLElement {
         <tr data-i="${i}">
           <td><input class="pcs-in pcs-start" type="time" value="${minToHHMM(b.start_min)}"></td>
           <td>${endCell}</td>
-          <td><input class="pcs-in pcs-target" type="number" step="0.5" min="5" max="30" value="${b.target}"></td>
+          <td><input class="pcs-in pcs-target" type="number" step="0.1" min="5" max="30" value="${b.target}"></td>
           <td style="text-align:center"><input class="pcs-active" type="checkbox" ${b.is_active ? "checked" : ""}></td>
           <td><button class="pcs-btn pcs-del">✕</button></td>
         </tr>`;

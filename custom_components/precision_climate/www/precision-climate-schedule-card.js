@@ -64,6 +64,10 @@ class PrecisionClimateScheduleCard extends HTMLElement {
 
   set hass(hass) {
     this._hass = hass;
+    // While the editor is open, live state updates from HA must not trigger a
+    // re-render: doing so rebuilds the inputs, dropping focus and discarding
+    // any in-progress edits. The editor is rendered explicitly on open.
+    if (this._edit) return;
     this._render();
   }
 

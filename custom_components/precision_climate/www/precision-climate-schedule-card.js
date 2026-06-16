@@ -322,7 +322,7 @@ const STYLE = `
   .pcs-body { padding: 8px 16px 16px; }
 
   /* Boiler status */
-  .pcs-boiler { padding: 6px 10px; border-radius: 8px; margin-bottom: 14px; font-size: .95em; }
+  .pcs-boiler { padding: 8px 12px; border-radius: 8px; margin-bottom: 14px; font-size: 1.05em; }
   .pcs-boiler-on  { background: rgba(217,102,59,.18); border: 1px solid rgba(217,102,59,.5); }
   .pcs-boiler-off { background: var(--secondary-background-color, rgba(255,255,255,.05)); border: 1px solid var(--divider-color, #444); }
   .pcs-reason { opacity: .75; font-size: .88em; }
@@ -331,14 +331,14 @@ const STYLE = `
   .pcs-room { margin-bottom: 18px; }
   .pcs-room-name { font-weight: 600; font-size: 1.05em; margin: 6px 0; display: flex; align-items: center; gap: 5px; }
   .pcs-heat-icon { font-size: 1em; line-height: 1; }
-  .pcs-cur-temp { font-weight: 400; font-size: .88em; opacity: .8; }
+  .pcs-cur-temp { font-weight: 400; font-size: .95em; opacity: .8; }
 
   /* Day row */
-  .pcs-day-head { display: flex; align-items: center; justify-content: space-between; font-size: .85em; opacity: .85; margin-top: 6px; }
+  .pcs-day-head { display: flex; align-items: center; justify-content: space-between; font-size: .95em; opacity: .85; margin-top: 6px; }
 
   /* Timeline */
   .pcs-timeline-wrap { position: relative; margin-top: 2px; }
-  .pcs-timeline { display: flex; height: 40px; border-radius: 6px; overflow: hidden; background: var(--divider-color, #444); }
+  .pcs-timeline { display: flex; height: 48px; border-radius: 6px; overflow: hidden; background: var(--divider-color, #444); }
   .pcs-seg {
     display: flex; align-items: center; justify-content: center;
     overflow: hidden; white-space: nowrap;
@@ -346,8 +346,8 @@ const STYLE = `
   }
   .pcs-seg.active  { background: var(--error-color, #d9663b); }
   .pcs-seg.passive { background: var(--primary-color, #3b78d9); opacity: .55; }
-  .pcs-seg-label { display: flex; flex-direction: column; align-items: center; font-size: .68em; color: #fff; line-height: 1.2; pointer-events: none; }
-  .pcs-seg-time { font-size: .88em; opacity: .85; }
+  .pcs-seg-label { display: flex; flex-direction: column; align-items: center; font-size: .9em; color: #fff; line-height: 1.25; pointer-events: none; }
+  .pcs-seg-time { font-size: .85em; opacity: .85; }
 
   /* Current-time needle */
   .pcs-needle {
@@ -360,7 +360,7 @@ const STYLE = `
   }
 
   /* Time axis — 7 ticks for 00 04 08 12 16 20 24 */
-  .pcs-axis { display: flex; justify-content: space-between; font-size: .7em; opacity: .6; margin-top: 2px; }
+  .pcs-axis { display: flex; justify-content: space-between; font-size: .85em; opacity: .6; margin-top: 3px; }
 
   /* Edit button */
   .pcs-btn { background: var(--secondary-background-color, #333); color: var(--primary-text-color, #fff); border: 1px solid var(--divider-color, #555); border-radius: 6px; padding: 3px 10px; cursor: pointer; font-size: .85em; }

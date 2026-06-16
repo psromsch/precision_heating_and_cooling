@@ -297,7 +297,9 @@ class PrecisionClimateConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             vol.Optional(CONF_SUNNY_MIN_HOURS, default=7): selector.NumberSelector(
                 selector.NumberSelectorConfig(min=0, max=24, step=0.5, mode="box")
             ),
-            vol.Optional(CONF_SUNNY_TARGET, default=DEFAULT_SUNNY_TARGET): _hysteresis_number(),
+            vol.Optional(CONF_SUNNY_TARGET, default=DEFAULT_SUNNY_TARGET): selector.NumberSelector(
+                selector.NumberSelectorConfig(min=5.0, max=25.0, step=0.5, mode="box", unit_of_measurement="°C")
+            ),
         }
         for kind in NOTIFICATION_KINDS:
             schema_dict[vol.Required(f"notify_{kind}", default=True)] = bool

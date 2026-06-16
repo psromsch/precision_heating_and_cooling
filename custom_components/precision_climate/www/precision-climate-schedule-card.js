@@ -256,14 +256,22 @@ class PrecisionClimateScheduleCard extends HTMLElement {
     const room = schedules.find((r) => r.room_id === e.room_id);
     const rows = e.blocks
       .map(
-        (b, i) => `
+        (b, i) => {
+          // 24:00 (1440 min) is not a valid <input type="time"> value — the
+          // browser renders it as "--:--" and hhmmToMin returns null on save.
+          // Show it as a read-only label so the user knows it's the day boundary.
+          const endCell = b.end_min === 1440
+            ? `<span class="pcs-end-fixed pcs-in" data-end1440>24:00</span>`
+            : `<input class="pcs-in pcs-end" type="time" value="${minToHHMM(b.end_min)}">`;
+          return `
         <tr data-i="${i}">
           <td><input class="pcs-in pcs-start" type="time" value="${minToHHMM(b.start_min)}"></td>
-          <td><input class="pcs-in pcs-end" type="time" value="${minToHHMM(b.end_min)}"></td>
+          <td>${endCell}</td>
           <td><input class="pcs-in pcs-target" type="number" step="0.5" min="5" max="30" value="${b.target}"></td>
           <td style="text-align:center"><input class="pcs-active" type="checkbox" ${b.is_active ? "checked" : ""}></td>
           <td><button class="pcs-btn pcs-del">✕</button></td>
-        </tr>`
+        </tr>`;
+        }
       )
       .join("");
     return `
@@ -288,9 +296,12 @@ class PrecisionClimateScheduleCard extends HTMLElement {
     const rows = this._body.querySelectorAll("tbody tr");
     const blocks = [];
     rows.forEach((tr) => {
+      const endFixed = tr.querySelector("[data-end1440]");
+      const endInput = tr.querySelector(".pcs-end");
+      const end_min = endFixed ? 1440 : hhmmToMin(endInput ? endInput.value : "");
       blocks.push({
         start_min: hhmmToMin(tr.querySelector(".pcs-start").value),
-        end_min: hhmmToMin(tr.querySelector(".pcs-end").value),
+        end_min,
         target: parseFloat(tr.querySelector(".pcs-target").value),
         is_active: tr.querySelector(".pcs-active").checked,
       });
@@ -375,6 +386,7 @@ const STYLE = `
   .pcs-table { width: 100%; border-collapse: collapse; margin: 8px 0; }
   .pcs-table th { text-align: left; font-size: .8em; opacity: .7; padding: 2px 4px; }
   .pcs-in { width: 100%; box-sizing: border-box; background: var(--card-background-color, #1c1c1c); color: var(--primary-text-color, #fff); border: 1px solid var(--divider-color, #555); border-radius: 4px; padding: 3px; }
+  .pcs-end-fixed { display: inline-block; opacity: .6; font-size: .9em; }
   .pcs-actions { display: flex; align-items: center; gap: 8px; margin-top: 8px; }
   .pcs-hint { font-size: .75em; opacity: .6; margin-top: 6px; }
   .pcs-error { color: var(--error-color, #d9663b); font-size: .85em; margin: 6px 0; }

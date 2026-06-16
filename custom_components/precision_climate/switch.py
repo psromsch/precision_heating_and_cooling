@@ -15,12 +15,7 @@ async def async_setup_entry(
     hass: HomeAssistant, entry: ConfigEntry, async_add_entities: AddEntitiesCallback
 ) -> None:
     coordinator = hass.data[DOMAIN][entry.entry_id]
-    async_add_entities(
-        [
-            MasterSwitch(coordinator, entry.entry_id),
-            PauseSwitch(coordinator, entry.entry_id),
-        ]
-    )
+    async_add_entities([MasterSwitch(coordinator, entry.entry_id)])
 
 
 class MasterSwitch(PrecisionBaseEntity, SwitchEntity):
@@ -42,24 +37,3 @@ class MasterSwitch(PrecisionBaseEntity, SwitchEntity):
 
     async def async_turn_off(self, **kwargs) -> None:
         await self._coordinator.async_set_master(False)
-
-
-class PauseSwitch(PrecisionBaseEntity, SwitchEntity):
-    """Temporarily pauses heating without disabling the system."""
-
-    _attr_name = "Heating Pause"
-    _attr_icon = "mdi:pause-circle"
-
-    def __init__(self, coordinator, entry_id: str) -> None:
-        super().__init__(coordinator, entry_id)
-        self._attr_unique_id = f"{entry_id}_pause"
-
-    @property
-    def is_on(self) -> bool:
-        return self._coordinator.paused
-
-    async def async_turn_on(self, **kwargs) -> None:
-        await self._coordinator.async_set_paused(True)
-
-    async def async_turn_off(self, **kwargs) -> None:
-        await self._coordinator.async_set_paused(False)

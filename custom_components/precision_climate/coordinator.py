@@ -124,8 +124,36 @@ class PrecisionClimateCoordinator:
                 async_track_state_change_event(self.hass, tracked, self._handle_state_event)
             )
         self._schedule_next_boundary()
+        # Seed the commanded state from the REAL entities so the first evaluation
+        # produces a genuine delta when reality disagrees with the decision
+        # (e.g. the boiler was left on, or config changed and the loop now wants
+        # it off). Without this, a fresh coordinator assumes everything is off
+        # and would skip the corrective service call.
+        self._reconcile_initial_state()
         # Trigger 4: startup safety check — force reality to match the logic.
         await self.async_evaluate()
+
+    def _reconcile_initial_state(self) -> None:
+        """Read the actual boiler/TRV state into the commanded-state caches."""
+        boiler = self.hass.states.get(self.config.boiler_switch)
+        self._boiler_on = boiler is not None and boiler.state == STATE_ON
+
+        # A TRV counts as "open" if its setpoint is nearer the force-flow value
+        # than the block-flow value (midpoint of 4 °C and 28 °C ≈ 16 °C).
+        force = force_flow_setpoint(self.mode)
+        block = block_flow_setpoint(self.mode)
+        midpoint = (force + block) / 2
+        for cfg in self.config.rooms:
+            targets = [self._trv_target(t) for t in cfg.trvs]
+            known = [t for t in targets if t is not None]
+            if not known:
+                continue
+            # Open only if every known TRV is on the force-flow side.
+            opens_toward_force = force >= block
+            self._trv_open[cfg.room_id] = all(
+                (t >= midpoint) if opens_toward_force else (t <= midpoint)
+                for t in known
+            )
 
     async def async_unload(self) -> None:
         for unsub in self._unsubs:

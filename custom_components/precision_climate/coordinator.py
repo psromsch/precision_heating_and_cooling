@@ -444,3 +444,29 @@ class PrecisionClimateCoordinator:
     @property
     def trv_open(self) -> dict[str, bool]:
         return dict(self._trv_open)
+
+    def schedule_payload(self) -> list[dict]:
+        """Serialize each room's schedule for the visual editor card."""
+        names = {r.room_id: r.name for r in self.config.rooms}
+        payload: list[dict] = []
+        for sched in self.config.schedules:
+            payload.append(
+                {
+                    "room_id": sched.room_id,
+                    "name": names.get(sched.room_id, sched.room_id),
+                    "mode": sched.mode.value,
+                    "blocks": {
+                        key: [
+                            {
+                                "start_min": b.start_min,
+                                "end_min": b.end_min,
+                                "target": b.target,
+                                "is_active": b.is_active,
+                            }
+                            for b in blocks
+                        ]
+                        for key, blocks in sched.blocks.items()
+                    },
+                }
+            )
+        return payload

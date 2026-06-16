@@ -1,0 +1,34 @@
+set_schedule:
+  name: Set room schedule
+  description: >
+    Replace one day's schedule blocks for a room. The blocks must cover the
+    whole day (00:00-24:00) with no gaps or overlaps. Used by the visual
+    schedule card, but can be called directly.
+  fields:
+    room_id:
+      name: Room ID
+      description: The room's id (slug), e.g. living.
+      required: true
+      example: living
+      selector:
+        text:
+    day_key:
+      name: Day key
+      description: >
+        Which day to replace. all (all_days mode); weekday/weekend
+        (weekday_weekend mode); mon..sun (per_day mode).
+      required: true
+      example: all
+      selector:
+        text:
+    blocks:
+      name: Blocks
+      description: >
+        List of {start_min, end_min, target, is_active}. Minutes are
+        minute-of-day (0-1440).
+      required: true
+      example: >
+        [{"start_min": 0, "end_min": 480, "target": 18, "is_active": false},
+         {"start_min": 480, "end_min": 1440, "target": 21, "is_active": true}]
+      selector:
+        object:

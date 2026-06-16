@@ -2,17 +2,22 @@
 
 from __future__ import annotations
 
+import os
 from typing import TYPE_CHECKING
 
-from .const import DOMAIN
+from .const import CONF_ROOMS, DOMAIN
 
 if TYPE_CHECKING:
     from homeassistant.config_entries import ConfigEntry
-    from homeassistant.core import HomeAssistant
+    from homeassistant.core import HomeAssistant, ServiceCall
 
 # Platforms are added in the entities milestone. Keep in sync with the files in
 # the entities/ package.
 PLATFORMS: list[str] = ["switch", "binary_sensor", "sensor"]
+
+SERVICE_SET_SCHEDULE = "set_schedule"
+CARD_URL = f"/{DOMAIN}/precision-climate-schedule-card.js"
+CARD_FILENAME = "precision-climate-schedule-card.js"
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
@@ -27,6 +32,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     hass.data.setdefault(DOMAIN, {})[entry.entry_id] = coordinator
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
     entry.async_on_unload(entry.add_update_listener(_async_reload))
+
+    await _async_register_card(hass)
+    _async_register_services(hass)
     return True
 
 
@@ -42,3 +50,79 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 async def _async_reload(hass: HomeAssistant, entry: ConfigEntry) -> None:
     """Reload the entry when its options change."""
     await hass.config_entries.async_reload(entry.entry_id)
+
+
+def _async_register_services(hass: HomeAssistant) -> None:
+    """Register the set_schedule service once (shared across entries)."""
+    if hass.services.has_service(DOMAIN, SERVICE_SET_SCHEDULE):
+        return
+
+    import voluptuous as vol
+
+    from .models.schedule_update import ScheduleUpdateError, apply_schedule_update
+
+    schema = vol.Schema(
+        {
+            vol.Required("room_id"): str,
+            vol.Required("day_key"): str,
+            vol.Required("blocks"): [
+                {
+                    vol.Required("start_min"): vol.Coerce(int),
+                    vol.Required("end_min"): vol.Coerce(int),
+                    vol.Required("target"): vol.Coerce(float),
+                    vol.Required("is_active"): vol.Coerce(bool),
+                }
+            ],
+        }
+    )
+
+    async def _handle_set_schedule(call: "ServiceCall") -> None:
+        room_id = call.data["room_id"]
+        day_key = call.data["day_key"]
+        blocks = call.data["blocks"]
+
+        # Find the entry that owns this room and update its stored schedule.
+        for entry in hass.config_entries.async_entries(DOMAIN):
+            merged = {**entry.data, **entry.options}
+            rooms = merged.get(CONF_ROOMS, [])
+            if not any(r.get("room_id") == room_id for r in rooms):
+                continue
+            try:
+                new_rooms = apply_schedule_update(rooms, room_id, day_key, blocks)
+            except ScheduleUpdateError as err:
+                raise vol.Invalid(str(err)) from err
+            new_options = {**entry.options, CONF_ROOMS: new_rooms}
+            # Triggers the update listener -> reload -> re-evaluation.
+            hass.config_entries.async_update_entry(entry, options=new_options)
+            return
+        raise vol.Invalid(f"No configured room '{room_id}' found")
+
+    hass.services.async_register(
+        DOMAIN, SERVICE_SET_SCHEDULE, _handle_set_schedule, schema=schema
+    )
+
+
+async def _async_register_card(hass: HomeAssistant) -> None:
+    """Serve and auto-load the visual schedule card as a frontend module."""
+    if hass.data.get(f"{DOMAIN}_card_registered"):
+        return
+    hass.data[f"{DOMAIN}_card_registered"] = True
+
+    card_path = os.path.join(os.path.dirname(__file__), "www", CARD_FILENAME)
+
+    try:
+        from homeassistant.components.http import StaticPathConfig
+
+        await hass.http.async_register_static_paths(
+            [StaticPathConfig(CARD_URL, card_path, False)]
+        )
+    except ImportError:
+        # Fallback for very old cores.
+        hass.http.register_static_path(CARD_URL, card_path, False)
+
+    try:
+        from homeassistant.components.frontend import add_extra_js_url
+
+        add_extra_js_url(hass, CARD_URL)
+    except Exception:  # noqa: BLE001 - frontend not loaded; card can be added manually
+        pass

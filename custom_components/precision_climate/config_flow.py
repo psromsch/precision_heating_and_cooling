@@ -196,15 +196,24 @@ class PrecisionClimateConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     @staticmethod
     @callback
     def async_get_options_flow(config_entry):
-        return PrecisionClimateOptionsFlow(config_entry)
+        return PrecisionClimateOptionsFlow()
 
 
 class PrecisionClimateOptionsFlow(config_entries.OptionsFlow):
-    """Manage rooms, schedules, default room, sunny day and notifications."""
+    """Manage rooms, schedules, default room, sunny day and notifications.
 
-    def __init__(self, config_entry) -> None:
-        self.config_entry = config_entry
-        merged = {**config_entry.data, **config_entry.options}
+    On modern Home Assistant ``self.config_entry`` is provided automatically by
+    the framework, so we must NOT set it ourselves. Working state is loaded
+    lazily the first time a step runs.
+    """
+
+    _loaded = False
+
+    def _ensure_loaded(self) -> None:
+        if self._loaded:
+            return
+        entry = self.config_entry
+        merged = {**entry.data, **entry.options}
         self._rooms: list[dict] = [dict(r) for r in merged.get(CONF_ROOMS, [])]
         self._default_room = merged.get(CONF_DEFAULT_ROOM)
         self._notify_services = list(merged.get(CONF_NOTIFY_SERVICES, []))
@@ -214,10 +223,12 @@ class PrecisionClimateOptionsFlow(config_entries.OptionsFlow):
         self._editing_id: str | None = None
         self._current_room: dict | None = None
         self._detail = ""
+        self._loaded = True
 
     # --- Menu ----------------------------------------------------------------
 
     async def async_step_init(self, user_input: dict | None = None):
+        self._ensure_loaded()
         return self.async_show_menu(
             step_id="init",
             menu_options=["add_room", "manage_rooms", "settings"],
@@ -237,6 +248,7 @@ class PrecisionClimateOptionsFlow(config_entries.OptionsFlow):
     # --- Add / edit a room ---------------------------------------------------
 
     async def async_step_add_room(self, user_input: dict | None = None):
+        self._ensure_loaded()
         self._editing_id = None
         return await self._room_form(user_input)
 
@@ -330,6 +342,7 @@ class PrecisionClimateOptionsFlow(config_entries.OptionsFlow):
     # --- Manage existing rooms ----------------------------------------------
 
     async def async_step_manage_rooms(self, user_input: dict | None = None):
+        self._ensure_loaded()
         if not self._rooms:
             return self.async_abort(reason="no_rooms")
 
@@ -366,6 +379,7 @@ class PrecisionClimateOptionsFlow(config_entries.OptionsFlow):
     # --- General settings ----------------------------------------------------
 
     async def async_step_settings(self, user_input: dict | None = None):
+        self._ensure_loaded()
         errors: dict[str, str] = {}
         if user_input is not None:
             self._default_room = user_input.get(CONF_DEFAULT_ROOM)
@@ -414,7 +428,7 @@ class PrecisionClimateOptionsFlow(config_entries.OptionsFlow):
             )
         schema_dict[
             vol.Optional(CONF_NOTIFY_SERVICES, default=self._notify_services)
-        ] = _notify_services_selector(self.config_entry.hass)
+        ] = _notify_services_selector(self.hass)
         schema_dict.update({
             vol.Required(
                 CONF_SUNNY_ENABLED, default=self._sunny.get(CONF_SUNNY_ENABLED, False)

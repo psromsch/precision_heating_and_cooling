@@ -28,6 +28,10 @@ const DAY_LABELS = {
 
 const DAY_ORDER = ["all", "weekday", "weekend", "mon", "tue", "wed", "thu", "fri", "sat", "sun"];
 
+// Shown in the card footer so you can confirm which card version is live
+// after a HACS update (keep in sync with manifest.json).
+const CARD_VERSION = "0.2.3";
+
 const pad = (n) => String(n).padStart(2, "0");
 const minToHHMM = (m) => {
   const h = Math.floor(m / 60);
@@ -115,12 +119,29 @@ class PrecisionClimateScheduleCard extends HTMLElement {
 
   async _save() {
     const e = this._edit;
-    const blocks = e.blocks.map((b) => ({
-      start_min: typeof b.start_min === "string" ? hhmmToMin(b.start_min) : b.start_min,
-      end_min: typeof b.end_min === "string" ? hhmmToMin(b.end_min) : b.end_min,
-      target: parseFloat(b.target),
-      is_active: !!b.is_active,
-    }));
+    const toMin = (v) => (typeof v === "string" ? hhmmToMin(v) : v);
+    const blocks = e.blocks.map((b, i) => {
+      let start = toMin(b.start_min);
+      let end = toMin(b.end_min);
+      // A blank <input type="time"> yields null. The day's final block ends at
+      // 24:00 (1440); a null end on the last row almost always means that. Treat
+      // a null/0 end on the last block as the end-of-day boundary so we never
+      // send null to the service (which rejects it with "expected int").
+      if ((end === null || end === 0) && i === e.blocks.length - 1) end = 1440;
+      return {
+        start_min: start,
+        end_min: end,
+        target: parseFloat(b.target),
+        is_active: !!b.is_active,
+      };
+    });
+    // Guard: bail out with a friendly message instead of sending bad data.
+    const bad = blocks.find((b) => b.start_min === null || b.end_min === null);
+    if (bad) {
+      this._error = "Every block needs a valid start and end time.";
+      this._render();
+      return;
+    }
     try {
       await this._hass.callService("precision_climate", "set_schedule", {
         room_id: e.room_id,
@@ -179,7 +200,8 @@ class PrecisionClimateScheduleCard extends HTMLElement {
 
     this._body.innerHTML =
       this._renderBoilerStatus(boilerOn, reason) +
-      schedules.map((room) => this._renderRoom(room, roomsInfo)).join("");
+      schedules.map((room) => this._renderRoom(room, roomsInfo)).join("") +
+      `<div class="pcs-version">card v${CARD_VERSION}</div>`;
 
     this._body.querySelectorAll("[data-edit]").forEach((btn) => {
       btn.addEventListener("click", () => {
@@ -391,6 +413,7 @@ const STYLE = `
   .pcs-hint { font-size: .75em; opacity: .6; margin-top: 6px; }
   .pcs-error { color: var(--error-color, #d9663b); font-size: .85em; margin: 6px 0; }
   .pcs-empty { opacity: .7; padding: 12px 0; }
+  .pcs-version { text-align: right; font-size: .7em; opacity: .35; margin-top: 8px; }
 `;
 
 customElements.define("precision-climate-schedule-card", PrecisionClimateScheduleCard);

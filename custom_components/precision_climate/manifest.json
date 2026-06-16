@@ -1,7 +1,7 @@
 {
   "domain": "precision_climate",
   "name": "Precision Climate",
-  "version": "0.2.2",
+  "version": "0.2.3",
   "codeowners": ["@psromsch"],
   "config_flow": true,
   "documentation": "https://github.com/psromsch/precision_heating_and_cooling",

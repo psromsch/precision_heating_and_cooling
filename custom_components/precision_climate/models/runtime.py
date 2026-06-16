@@ -19,6 +19,7 @@ from ..const import (
     CONF_LOWER_HYSTERESIS,
     CONF_NOTIFICATIONS,
     CONF_NOTIFY_SERVICE,
+    CONF_NOTIFY_SERVICES,
     CONF_ROOM_ID,
     CONF_ROOM_NAME,
     CONF_ROOMS,
@@ -73,7 +74,7 @@ class RuntimeConfig:
     schedules: list[RoomSchedule]
     default_room: str | None
     sunny_day: SunnyDayConfig
-    notify_service: str | None = None
+    notify_services: list[str] = field(default_factory=list)
     notifications: dict[str, bool] = field(default_factory=dict)
 
     def room_by_id(self, room_id: str) -> RoomConfig | None:
@@ -130,12 +131,19 @@ def build_runtime(data: dict) -> RuntimeConfig:
         end_min=int(raw_sunny.get(CONF_SUNNY_END_MIN, DEFAULT_SUNNY_END_MIN)),
     )
 
+    # Notify services: prefer the new list key, fall back to the legacy single
+    # string for any entries created before the multi-select change.
+    notify_services = list(data.get(CONF_NOTIFY_SERVICES, []))
+    legacy = data.get(CONF_NOTIFY_SERVICE)
+    if legacy and legacy not in notify_services:
+        notify_services.append(legacy)
+
     return RuntimeConfig(
         boiler_switch=data[CONF_BOILER_SWITCH],
         rooms=rooms,
         schedules=schedules,
         default_room=data.get(CONF_DEFAULT_ROOM),
         sunny_day=sunny,
-        notify_service=data.get(CONF_NOTIFY_SERVICE),
+        notify_services=notify_services,
         notifications=dict(data.get(CONF_NOTIFICATIONS, {})),
     )

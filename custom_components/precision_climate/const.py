@@ -47,6 +47,7 @@ CONF_BOILER_SWITCH = "boiler_switch"
 CONF_ROOMS = "rooms"
 CONF_DEFAULT_ROOM = "default_room"
 CONF_NOTIFY_SERVICE = "notify_service"
+CONF_NOTIFY_SERVICES = "notify_services"
 CONF_NOTIFICATIONS = "notifications"
 CONF_SUNNY_DAY = "sunny_day"
 

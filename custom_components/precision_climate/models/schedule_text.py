@@ -75,6 +75,23 @@ def parse_day_schedule(text: str) -> list[ScheduleBlock]:
     return blocks
 
 
+def _fmt_hhmm(minutes: int) -> str:
+    return f"{minutes // 60:02d}:{minutes % 60:02d}"
+
+
+def dicts_to_text(block_dicts: list[dict]) -> str:
+    """Render stored block dicts back to the editable text form (for pre-filling)."""
+    lines = []
+    for b in sorted(block_dicts, key=lambda d: d["start_min"]):
+        active = "active" if b["is_active"] else "passive"
+        target = b["target"]
+        target_s = f"{target:g}"
+        lines.append(
+            f"{_fmt_hhmm(b['start_min'])}-{_fmt_hhmm(b['end_min'])} {target_s} {active}"
+        )
+    return "\n".join(lines)
+
+
 def blocks_to_dicts(blocks: list[ScheduleBlock]) -> list[dict]:
     """Serialise blocks to the plain-dict form stored in the config entry."""
     return [

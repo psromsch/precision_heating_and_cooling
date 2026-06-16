@@ -75,8 +75,16 @@ def test_build_runtime_parses_sunny_and_notifications():
     assert rt.sunny_day.forecast_entity == "sensor.sunny_hours"
     assert rt.sunny_day.reduced_target == 17.0
     assert rt.sunny_day.end_min == 720
-    assert rt.notify_service == "notify.mobile_app_phone"
+    assert rt.notify_services == ["notify.mobile_app_phone"]
     assert rt.notifications == {"overheating": False}
+
+
+def test_notify_services_list_key_preferred():
+    data = sample_data()
+    del data["notify_service"]
+    data["notify_services"] = ["notify.a", "notify.b"]
+    rt = build_runtime(data)
+    assert rt.notify_services == ["notify.a", "notify.b"]
 
 
 def test_room_by_id_lookup():

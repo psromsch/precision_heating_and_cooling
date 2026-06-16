@@ -13,6 +13,7 @@ from custom_components.precision_climate.models.schedule import RoomSchedule, Sc
 from custom_components.precision_climate.models.schedule_text import (
     ParseError,
     blocks_to_dicts,
+    dicts_to_text,
     parse_day_schedule,
 )
 
@@ -67,3 +68,12 @@ def test_blocks_to_dicts_roundtrip_shape():
     blocks = parse_day_schedule("00:00-24:00 20 active")
     dicts = blocks_to_dicts(blocks)
     assert dicts == [{"start_min": 0, "end_min": 1440, "target": 20.0, "is_active": True}]
+
+
+def test_dicts_to_text_roundtrips_through_parser():
+    original = "00:00-08:00 18 passive\n08:00-24:00 21 active"
+    dicts = blocks_to_dicts(parse_day_schedule(original))
+    text = dicts_to_text(dicts)
+    # Re-parsing the rendered text yields the same blocks.
+    assert blocks_to_dicts(parse_day_schedule(text)) == dicts
+    assert text == original

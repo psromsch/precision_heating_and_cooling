@@ -52,25 +52,13 @@
           "upper_hysteresis": "How far above target before the room's TRV closes."
         }
       },
-      "schedule": {
-        "title": "Room schedule",
-        "description": "One block per line: HH:MM-HH:MM target active|passive. The day must be covered with no gaps (00:00 to 24:00).\n\nExample:\n{example}\n\n{detail}",
-        "data": {
-          "all": "Every day",
-          "weekday": "Weekdays (Mon-Fri)",
-          "weekend": "Weekend (Sat-Sun)",
-          "mon": "Monday",
-          "tue": "Tuesday",
-          "wed": "Wednesday",
-          "thu": "Thursday",
-          "fri": "Friday",
-          "sat": "Saturday",
-          "sun": "Sunday"
-        }
+      "room_created": {
+        "title": "Room created",
+        "description": "Room \"{name}\" was created with a default schedule (18 °C, active all day). To set its real schedule, open the Precision Climate Schedule card on your dashboard and edit it there."
       },
       "manage_rooms": {
         "title": "Manage rooms",
-        "description": "Pick a room and an action. Edit reopens the room form (and schedule) pre-filled; delete removes it.",
+        "description": "Pick a room and an action. Edit reopens the room form pre-filled (the schedule is edited via the dashboard card); delete removes it.",
         "data": {
           "room": "Room",
           "action": "Action"

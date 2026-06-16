@@ -57,9 +57,7 @@ from .models.schedule import (
     ScheduleMode,
 )
 from .models.schedule_text import (
-    ParseError,
     blocks_to_dicts,
-    dicts_to_text,
     parse_day_schedule,
 )
 from .scheduler.engine import validate
@@ -81,6 +79,9 @@ _DAY_KEYS_FOR_MODE = {
     ScheduleMode.WEEKDAY_WEEKEND: ["weekday", "weekend"],
     ScheduleMode.PER_DAY: list(DAY_KEYS_PER_DAY),
 }
+
+# Default schedule seeded for newly created rooms; edited later via the card.
+DEFAULT_DAY_SCHEDULE = "00:00-24:00 18 active"
 
 
 def _entity_picker(domain, multiple=False):
@@ -268,16 +269,25 @@ class PrecisionClimateOptionsFlow(config_entries.OptionsFlow):
             elif room_id in existing:
                 errors["base"] = "duplicate_room"
             else:
-                # Preserve the existing schedule (if editing) so the schedule
-                # editor pre-fills, unless the schedule mode changed.
+                # The schedule is no longer entered here. New rooms get a default
+                # full-day block; editing a room preserves its existing schedule
+                # (which is edited via the visual card). A schedule-mode change
+                # re-seeds defaults for the new set of day keys.
                 prev = next(
                     (r for r in self._rooms if r[CONF_ROOM_ID] == self._editing_id), {}
                 )
-                keep_blocks = (
+                mode = ScheduleMode(user_input[CONF_SCHEDULE_MODE])
+                prev_blocks = (
                     prev.get(CONF_SCHEDULE_BLOCKS, {})
                     if prev.get(CONF_SCHEDULE_MODE) == user_input[CONF_SCHEDULE_MODE]
                     else {}
                 )
+                default_day = blocks_to_dicts(parse_day_schedule(DEFAULT_DAY_SCHEDULE))
+                blocks_by_day = {
+                    key: prev_blocks.get(key) or [dict(b) for b in default_day]
+                    for key in _DAY_KEYS_FOR_MODE[mode]
+                }
+                is_new = self._editing_id is None
                 self._current_room = {
                     CONF_ROOM_ID: room_id,
                     CONF_ROOM_NAME: name,
@@ -287,9 +297,18 @@ class PrecisionClimateOptionsFlow(config_entries.OptionsFlow):
                     CONF_LOWER_HYSTERESIS: lower,
                     CONF_UPPER_HYSTERESIS: upper,
                     CONF_SCHEDULE_MODE: user_input[CONF_SCHEDULE_MODE],
-                    CONF_SCHEDULE_BLOCKS: keep_blocks,
+                    CONF_SCHEDULE_BLOCKS: blocks_by_day,
                 }
-                return await self.async_step_schedule()
+                # Replace if editing, else append.
+                self._rooms = [
+                    r for r in self._rooms if r[CONF_ROOM_ID] != room_id
+                ]
+                self._rooms.append(self._current_room)
+                if self._default_room is None:
+                    self._default_room = room_id
+                if is_new:
+                    return await self.async_step_room_created()
+                return self._save()
 
         return self.async_show_form(
             step_id="add_room",
@@ -297,62 +316,15 @@ class PrecisionClimateOptionsFlow(config_entries.OptionsFlow):
             errors=errors,
         )
 
-    async def async_step_schedule(self, user_input: dict | None = None):
-        assert self._current_room is not None
-        mode = ScheduleMode(self._current_room[CONF_SCHEDULE_MODE])
-        day_keys = _DAY_KEYS_FOR_MODE[mode]
-        errors: dict[str, str] = {}
-
+    async def async_step_room_created(self, user_input: dict | None = None):
+        """Confirmation shown after creating a room with the default schedule."""
         if user_input is not None:
-            blocks_by_day: dict[str, list[dict]] = {}
-            try:
-                for key in day_keys:
-                    blocks = parse_day_schedule(user_input.get(key, ""))
-                    sched = RoomSchedule(
-                        self._current_room[CONF_ROOM_ID], mode, {key: blocks}
-                    )
-                    coverage = sched.coverage_errors()
-                    if coverage:
-                        errors["base"] = "schedule_coverage"
-                        self._detail = "; ".join(coverage)
-                        break
-                    blocks_by_day[key] = blocks_to_dicts(blocks)
-            except ParseError as err:
-                errors["base"] = "schedule_parse"
-                self._detail = str(err)
-
-            if not errors:
-                self._current_room[CONF_SCHEDULE_BLOCKS] = blocks_by_day
-                # Replace if editing, else append.
-                self._rooms = [
-                    r for r in self._rooms if r[CONF_ROOM_ID] != self._current_room[CONF_ROOM_ID]
-                ]
-                self._rooms.append(self._current_room)
-                if self._default_room is None:
-                    self._default_room = self._current_room[CONF_ROOM_ID]
-                return self._save()
-
-        # Pre-fill the textareas when editing an existing room.
-        # For new rooms (no existing blocks) seed a full-day active block at 18 °C
-        # so users can jump straight to the visual card without touching the text form.
-        existing_blocks = self._current_room.get(CONF_SCHEDULE_BLOCKS, {})
-        _default_sched = "00:00-24:00 18 active"
-        schema = vol.Schema(
-            {
-                vol.Required(
-                    key, default=dicts_to_text(existing_blocks.get(key, [])) or _default_sched
-                ): selector.TextSelector(selector.TextSelectorConfig(multiline=True))
-                for key in day_keys
-            }
-        )
+            return self._save()
+        assert self._current_room is not None
         return self.async_show_form(
-            step_id="schedule",
-            data_schema=schema,
-            errors=errors,
-            description_placeholders={
-                "detail": self._detail,
-                "example": "00:00-08:00 18 passive\n08:00-24:00 21 active",
-            },
+            step_id="room_created",
+            data_schema=vol.Schema({}),
+            description_placeholders={"name": self._current_room[CONF_ROOM_NAME]},
         )
 
     # --- Manage existing rooms ----------------------------------------------

@@ -30,12 +30,35 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     await coordinator.async_setup()
 
     hass.data.setdefault(DOMAIN, {})[entry.entry_id] = coordinator
+    _async_cleanup_orphan_entities(hass, entry, coordinator)
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
     entry.async_on_unload(entry.add_update_listener(_async_reload))
 
     await _async_register_card(hass)
     _async_register_services(hass)
     return True
+
+
+def _async_cleanup_orphan_entities(hass, entry, coordinator) -> None:
+    """Remove entities for rooms that no longer exist.
+
+    Deleting a room leaves its sensors/binary_sensors registered but
+    permanently "unavailable". On each setup we rebuild the set of unique_ids
+    the current config produces and purge any registry entry for this config
+    entry that isn't in it.
+    """
+    from homeassistant.helpers import entity_registry as er
+
+    entry_id = entry.entry_id
+    valid = {f"{entry_id}_master", f"{entry_id}_status"}
+    for room in coordinator.config.rooms:
+        valid.add(f"{entry_id}_{room.room_id}_target")
+        valid.add(f"{entry_id}_{room.room_id}_heating")
+
+    registry = er.async_get(hass)
+    for ent in list(registry.entities.values()):
+        if ent.config_entry_id == entry_id and ent.unique_id not in valid:
+            registry.async_remove(ent.entity_id)
 
 
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:

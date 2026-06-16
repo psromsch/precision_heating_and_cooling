@@ -2,16 +2,42 @@
   "config": {
     "step": {
       "user": {
-        "title": "Precision Climate — System",
-        "description": "Select the boiler switch and (optionally) a notify service such as notify.mobile_app_your_phone.",
+        "title": "Precision Climate",
+        "description": "Select the boiler switch. You can add rooms, schedules and everything else afterwards from the integration's Configure button.",
         "data": {
           "boiler_switch": "Boiler switch",
-          "notify_service": "Notify service (optional)"
+          "notify_services": "Notify services (optional)"
+        },
+        "data_description": {
+          "notify_services": "Choose one or more notify.* services to receive alerts. Leave empty for none."
+        }
+      }
+    },
+    "error": {
+      "duplicate_room": "A room with that name already exists.",
+      "hysteresis_both_zero": "At least one of the upper/lower hysteresis values must be greater than 0.",
+      "schedule_parse": "Could not parse the schedule: {detail}",
+      "schedule_coverage": "The schedule must cover the whole day with no gaps: {detail}",
+      "config_invalid": "The configuration is invalid: {detail}"
+    },
+    "abort": {
+      "already_configured": "Precision Climate is already configured."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Precision Climate",
+        "description": "Add or manage rooms, and adjust general settings.",
+        "menu_options": {
+          "add_room": "Add a room",
+          "manage_rooms": "Edit or delete a room",
+          "settings": "Default room, sunny day & notifications"
         }
       },
-      "room": {
-        "title": "Add a room",
-        "description": "Configure one room. You can add more rooms afterwards.",
+      "add_room": {
+        "title": "Room",
+        "description": "Configure the room's entities and hysteresis. At least one hysteresis side may be 0, but not both.",
         "data": {
           "name": "Room name",
           "trvs": "TRV climate entities",
@@ -20,6 +46,10 @@
           "lower_hysteresis": "Lower hysteresis (°C below target)",
           "upper_hysteresis": "Upper hysteresis (°C above target)",
           "schedule_mode": "Schedule mode"
+        },
+        "data_description": {
+          "lower_hysteresis": "How far below target an active room drops before calling the boiler.",
+          "upper_hysteresis": "How far above target before the room's TRV closes."
         }
       },
       "schedule": {
@@ -38,18 +68,20 @@
           "sun": "Sunday"
         }
       },
-      "room_menu": {
-        "title": "Rooms",
-        "description": "{count} room(s) configured. Add another?",
+      "manage_rooms": {
+        "title": "Manage rooms",
+        "description": "Pick a room and an action. Edit reopens the room form (and schedule) pre-filled; delete removes it.",
         "data": {
-          "add_another": "Add another room"
+          "room": "Room",
+          "action": "Action"
         }
       },
-      "finish": {
-        "title": "Finishing settings",
-        "description": "Pick the default active room (used when no room is active), configure optional sunny-day savings, and choose which notifications to enable.\n\n{detail}",
+      "settings": {
+        "title": "General settings",
+        "description": "Default room is used whenever no room is active. Enable optional sunny-day savings, and choose which notifications to receive.\n\n{detail}",
         "data": {
           "default_room": "Default active room",
+          "notify_services": "Notify services",
           "enabled": "Enable sunny-day savings",
           "forecast_entity": "Sunny-hours forecast sensor",
           "min_hours": "Minimum sunny hours to trigger",
@@ -62,36 +94,42 @@
           "notify_trv_unavailable": "Notify: TRV unavailable",
           "notify_window": "Notify: window open",
           "notify_sunny_day": "Notify: sunny-day savings"
+        },
+        "data_description": {
+          "notify_unauthorized_boiler": "Boiler turned on while the system is off/paused or a window is open in an active room — it is forced back off.",
+          "notify_prolonged_heating": "The boiler has been running continuously for over 5 hours.",
+          "notify_overheating": "A heating room has exceeded the overheat threshold (24°C).",
+          "notify_trv_mismatch": "A room that should be heating has a TRV target below its schedule target (the valve didn't take the open command).",
+          "notify_trv_unresponsive": "The boiler ran 45 min but a heating room's temperature barely rose — likely an open window or a failed valve.",
+          "notify_trv_unavailable": "A TRV went offline for over 15 minutes while its room was heating.",
+          "notify_window": "A window opened in an active room and heating was suspended.",
+          "notify_sunny_day": "Sunny-day savings reduced the active-room targets to save energy."
         }
       }
     },
     "error": {
       "duplicate_room": "A room with that name already exists.",
+      "hysteresis_both_zero": "At least one of the upper/lower hysteresis values must be greater than 0.",
       "schedule_parse": "Could not parse the schedule: {detail}",
-      "schedule_coverage": "The schedule does not fully cover the day: {detail}",
+      "schedule_coverage": "The schedule must cover the whole day with no gaps: {detail}",
       "config_invalid": "The configuration is invalid: {detail}"
     },
     "abort": {
-      "already_configured": "Precision Climate is already configured."
+      "no_rooms": "There are no rooms to manage yet. Add one first."
     }
   },
-  "options": {
-    "step": {
-      "init": {
-        "title": "Precision Climate options",
-        "description": "Adjust the default room, sunny-day savings, and notification toggles.",
-        "data": {
-          "default_room": "Default active room",
-          "enabled": "Enable sunny-day savings",
-          "notify_unauthorized_boiler": "Notify: unauthorized boiler",
-          "notify_prolonged_heating": "Notify: prolonged heating",
-          "notify_overheating": "Notify: overheating",
-          "notify_trv_mismatch": "Notify: TRV setpoint mismatch",
-          "notify_trv_unresponsive": "Notify: TRV unresponsive",
-          "notify_trv_unavailable": "Notify: TRV unavailable",
-          "notify_window": "Notify: window open",
-          "notify_sunny_day": "Notify: sunny-day savings"
-        }
+  "selector": {
+    "schedule_mode": {
+      "options": {
+        "all_days": "Same every day",
+        "weekday_weekend": "Weekdays vs weekend",
+        "per_day": "Different every day"
+      }
+    },
+    "room_action": {
+      "options": {
+        "edit": "Edit",
+        "delete": "Delete"
       }
     }
   }

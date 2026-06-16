@@ -1,17 +1,13 @@
 """Config flow for Precision Climate.
 
-A multi-step wizard:
-
-    user      -> system settings (boiler switch, notify service)
-    room      -> one room's entities + hysteresis + schedule mode
-    schedule  -> that room's schedule as text (validated for full coverage)
-    room_menu -> add another room or finish
-    finish    -> default room, sunny day, notification toggles, final validation
+Installation is intentionally tiny: pick the boiler switch and (optionally) the
+notify services. Everything else -- rooms, schedules, default room, sunny day,
+notification toggles -- is managed afterwards from the integration's *Configure*
+button via the options flow, so you can build and edit your setup at any time
+without reinstalling.
 
 Schedules are entered with the text format parsed by ``models.schedule_text``;
-gaps/overlaps are rejected before the entry is created. The options flow lets the
-user tweak the lightweight settings (default room, sunny day, notifications)
-without re-running the whole wizard.
+gaps/overlaps are rejected before they are saved.
 """
 
 from __future__ import annotations
@@ -21,7 +17,7 @@ from typing import Any
 import voluptuous as vol
 
 from homeassistant import config_entries
-from homeassistant.core import callback
+from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers import selector
 from homeassistant.util import slugify
 
@@ -34,7 +30,7 @@ from .const import (
     CONF_DEFAULT_ROOM,
     CONF_LOWER_HYSTERESIS,
     CONF_NOTIFICATIONS,
-    CONF_NOTIFY_SERVICE,
+    CONF_NOTIFY_SERVICES,
     CONF_ROOM_ID,
     CONF_ROOM_NAME,
     CONF_ROOMS,
@@ -60,7 +56,12 @@ from .models.schedule import (
     ScheduleBlock,
     ScheduleMode,
 )
-from .models.schedule_text import ParseError, blocks_to_dicts, parse_day_schedule
+from .models.schedule_text import (
+    ParseError,
+    blocks_to_dicts,
+    dicts_to_text,
+    parse_day_schedule,
+)
 from .scheduler.engine import validate
 
 # The notification kinds the user can toggle on/off.
@@ -89,13 +90,33 @@ def _entity_picker(domain, multiple=False):
 
 
 def _hysteresis_number():
+    # min is 0 so one side can be 0; we validate that not BOTH are 0.
     return selector.NumberSelector(
-        selector.NumberSelectorConfig(min=0.1, max=5.0, step=0.1, mode="box")
+        selector.NumberSelectorConfig(min=0.0, max=5.0, step=0.1, mode="box")
+    )
+
+
+def _temp_number():
+    return selector.NumberSelector(
+        selector.NumberSelectorConfig(
+            min=5.0, max=25.0, step=0.5, mode="box", unit_of_measurement="°C"
+        )
+    )
+
+
+def _notify_services_selector(hass: HomeAssistant):
+    """Dropdown of the notify.* services currently registered in HA."""
+    services = hass.services.async_services().get("notify", {})
+    options = sorted(f"notify.{name}" for name in services)
+    return selector.SelectSelector(
+        selector.SelectSelectorConfig(
+            options=options, multiple=True, custom_value=True, mode="dropdown"
+        )
     )
 
 
 def _rooms_to_schedules(rooms: list[dict]) -> list[RoomSchedule]:
-    """Rebuild RoomSchedule objects from the stored room dicts for validation."""
+    """Rebuild RoomSchedule objects from stored room dicts for validation."""
     schedules: list[RoomSchedule] = []
     for r in rooms:
         blocks = {
@@ -116,42 +137,121 @@ def _rooms_to_schedules(rooms: list[dict]) -> list[RoomSchedule]:
     return schedules
 
 
+def _room_schema(defaults: dict | None = None) -> vol.Schema:
+    d = defaults or {}
+    return vol.Schema(
+        {
+            vol.Required(CONF_ROOM_NAME, default=d.get(CONF_ROOM_NAME, "")): selector.TextSelector(),
+            vol.Required(CONF_TRVS, default=d.get(CONF_TRVS, [])): _entity_picker(
+                "climate", multiple=True
+            ),
+            vol.Required(
+                CONF_THERMOMETER, default=d.get(CONF_THERMOMETER, "")
+            ): _entity_picker("sensor"),
+            vol.Optional(CONF_WINDOWS, default=d.get(CONF_WINDOWS, [])): _entity_picker(
+                "binary_sensor", multiple=True
+            ),
+            vol.Required(
+                CONF_LOWER_HYSTERESIS, default=d.get(CONF_LOWER_HYSTERESIS, 0.5)
+            ): _hysteresis_number(),
+            vol.Required(
+                CONF_UPPER_HYSTERESIS, default=d.get(CONF_UPPER_HYSTERESIS, 0.5)
+            ): _hysteresis_number(),
+            vol.Required(
+                CONF_SCHEDULE_MODE,
+                default=d.get(CONF_SCHEDULE_MODE, ScheduleMode.ALL_DAYS.value),
+            ): selector.SelectSelector(
+                selector.SelectSelectorConfig(
+                    options=[m.value for m in ScheduleMode],
+                    translation_key="schedule_mode",
+                )
+            ),
+        }
+    )
+
+
 class PrecisionClimateConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
-    """Handle the setup wizard."""
+    """Tiny install wizard: just the boiler and notify services."""
 
     VERSION = 1
 
-    def __init__(self) -> None:
-        self._data: dict[str, Any] = {}
-        self._rooms: list[dict] = []
-        self._current_room: dict | None = None
-
-    # --- Step: system settings ----------------------------------------------
-
     async def async_step_user(self, user_input: dict | None = None):
         if user_input is not None:
-            self._data[CONF_BOILER_SWITCH] = user_input[CONF_BOILER_SWITCH]
-            if user_input.get(CONF_NOTIFY_SERVICE):
-                self._data[CONF_NOTIFY_SERVICE] = user_input[CONF_NOTIFY_SERVICE]
-            return await self.async_step_room()
+            data = {
+                CONF_BOILER_SWITCH: user_input[CONF_BOILER_SWITCH],
+                CONF_NOTIFY_SERVICES: user_input.get(CONF_NOTIFY_SERVICES, []),
+            }
+            return self.async_create_entry(title="Precision Climate", data=data)
 
         schema = vol.Schema(
             {
                 vol.Required(CONF_BOILER_SWITCH): _entity_picker("switch"),
-                vol.Optional(CONF_NOTIFY_SERVICE): selector.TextSelector(),
+                vol.Optional(
+                    CONF_NOTIFY_SERVICES, default=[]
+                ): _notify_services_selector(self.hass),
             }
         )
         return self.async_show_form(step_id="user", data_schema=schema)
 
-    # --- Step: a room's entities --------------------------------------------
+    @staticmethod
+    @callback
+    def async_get_options_flow(config_entry):
+        return PrecisionClimateOptionsFlow(config_entry)
 
-    async def async_step_room(self, user_input: dict | None = None):
+
+class PrecisionClimateOptionsFlow(config_entries.OptionsFlow):
+    """Manage rooms, schedules, default room, sunny day and notifications."""
+
+    def __init__(self, config_entry) -> None:
+        self.config_entry = config_entry
+        merged = {**config_entry.data, **config_entry.options}
+        self._rooms: list[dict] = [dict(r) for r in merged.get(CONF_ROOMS, [])]
+        self._default_room = merged.get(CONF_DEFAULT_ROOM)
+        self._notify_services = list(merged.get(CONF_NOTIFY_SERVICES, []))
+        self._notifications = dict(merged.get(CONF_NOTIFICATIONS, {}))
+        self._sunny = dict(merged.get(CONF_SUNNY_DAY, {}))
+        # Transient state while adding/editing a room.
+        self._editing_id: str | None = None
+        self._current_room: dict | None = None
+        self._detail = ""
+
+    # --- Menu ----------------------------------------------------------------
+
+    async def async_step_init(self, user_input: dict | None = None):
+        return self.async_show_menu(
+            step_id="init",
+            menu_options=["add_room", "manage_rooms", "settings"],
+        )
+
+    def _save(self):
+        """Persist the working state to the entry options and close the dialog."""
+        options = {
+            CONF_ROOMS: self._rooms,
+            CONF_DEFAULT_ROOM: self._default_room,
+            CONF_NOTIFY_SERVICES: self._notify_services,
+            CONF_NOTIFICATIONS: self._notifications,
+            CONF_SUNNY_DAY: self._sunny,
+        }
+        return self.async_create_entry(title="", data=options)
+
+    # --- Add / edit a room ---------------------------------------------------
+
+    async def async_step_add_room(self, user_input: dict | None = None):
+        self._editing_id = None
+        return await self._room_form(user_input)
+
+    async def _room_form(self, user_input: dict | None, defaults: dict | None = None):
         errors: dict[str, str] = {}
         if user_input is not None:
+            lower = float(user_input[CONF_LOWER_HYSTERESIS])
+            upper = float(user_input[CONF_UPPER_HYSTERESIS])
             name = user_input[CONF_ROOM_NAME].strip()
-            room_id = slugify(name) or f"room_{len(self._rooms) + 1}"
-            existing = {r[CONF_ROOM_ID] for r in self._rooms}
-            if room_id in existing:
+            room_id = self._editing_id or slugify(name) or f"room_{len(self._rooms) + 1}"
+            existing = {r[CONF_ROOM_ID] for r in self._rooms if r[CONF_ROOM_ID] != self._editing_id}
+
+            if lower == 0 and upper == 0:
+                errors["base"] = "hysteresis_both_zero"
+            elif room_id in existing:
                 errors["base"] = "duplicate_room"
             else:
                 self._current_room = {
@@ -160,37 +260,17 @@ class PrecisionClimateConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     CONF_TRVS: user_input[CONF_TRVS],
                     CONF_THERMOMETER: user_input[CONF_THERMOMETER],
                     CONF_WINDOWS: user_input.get(CONF_WINDOWS, []),
-                    CONF_LOWER_HYSTERESIS: user_input[CONF_LOWER_HYSTERESIS],
-                    CONF_UPPER_HYSTERESIS: user_input[CONF_UPPER_HYSTERESIS],
+                    CONF_LOWER_HYSTERESIS: lower,
+                    CONF_UPPER_HYSTERESIS: upper,
                     CONF_SCHEDULE_MODE: user_input[CONF_SCHEDULE_MODE],
                 }
                 return await self.async_step_schedule()
 
-        schema = vol.Schema(
-            {
-                vol.Required(CONF_ROOM_NAME): selector.TextSelector(),
-                vol.Required(CONF_TRVS): _entity_picker("climate", multiple=True),
-                vol.Required(CONF_THERMOMETER): _entity_picker("sensor"),
-                vol.Optional(CONF_WINDOWS, default=[]): _entity_picker(
-                    "binary_sensor", multiple=True
-                ),
-                vol.Required(CONF_LOWER_HYSTERESIS, default=0.5): _hysteresis_number(),
-                vol.Required(CONF_UPPER_HYSTERESIS, default=0.5): _hysteresis_number(),
-                vol.Required(
-                    CONF_SCHEDULE_MODE, default=ScheduleMode.ALL_DAYS.value
-                ): selector.SelectSelector(
-                    selector.SelectSelectorConfig(
-                        options=[m.value for m in ScheduleMode],
-                        translation_key="schedule_mode",
-                    )
-                ),
-            }
-        )
         return self.async_show_form(
-            step_id="room", data_schema=schema, errors=errors
+            step_id="add_room",
+            data_schema=_room_schema(defaults or user_input),
+            errors=errors,
         )
-
-    # --- Step: that room's schedule text ------------------------------------
 
     async def async_step_schedule(self, user_input: dict | None = None):
         assert self._current_room is not None
@@ -209,24 +289,31 @@ class PrecisionClimateConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     coverage = sched.coverage_errors()
                     if coverage:
                         errors["base"] = "schedule_coverage"
-                        self._schedule_detail = "; ".join(coverage)
+                        self._detail = "; ".join(coverage)
                         break
                     blocks_by_day[key] = blocks_to_dicts(blocks)
             except ParseError as err:
                 errors["base"] = "schedule_parse"
-                self._schedule_detail = str(err)
+                self._detail = str(err)
 
             if not errors:
                 self._current_room[CONF_SCHEDULE_BLOCKS] = blocks_by_day
+                # Replace if editing, else append.
+                self._rooms = [
+                    r for r in self._rooms if r[CONF_ROOM_ID] != self._current_room[CONF_ROOM_ID]
+                ]
                 self._rooms.append(self._current_room)
-                self._current_room = None
-                return await self.async_step_room_menu()
+                if self._default_room is None:
+                    self._default_room = self._current_room[CONF_ROOM_ID]
+                return self._save()
 
+        # Pre-fill the textareas when editing an existing room.
+        existing_blocks = self._current_room.get(CONF_SCHEDULE_BLOCKS, {})
         schema = vol.Schema(
             {
-                vol.Required(key, default=""): selector.TextSelector(
-                    selector.TextSelectorConfig(multiline=True)
-                )
+                vol.Required(
+                    key, default=dicts_to_text(existing_blocks.get(key, []))
+                ): selector.TextSelector(selector.TextSelectorConfig(multiline=True))
                 for key in day_keys
             }
         )
@@ -235,37 +322,55 @@ class PrecisionClimateConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             data_schema=schema,
             errors=errors,
             description_placeholders={
-                "detail": getattr(self, "_schedule_detail", ""),
+                "detail": self._detail,
                 "example": "00:00-08:00 18 passive\n08:00-24:00 21 active",
             },
         )
 
-    # --- Step: add another room or finish -----------------------------------
+    # --- Manage existing rooms ----------------------------------------------
 
-    async def async_step_room_menu(self, user_input: dict | None = None):
+    async def async_step_manage_rooms(self, user_input: dict | None = None):
+        if not self._rooms:
+            return self.async_abort(reason="no_rooms")
+
         if user_input is not None:
-            if user_input["add_another"]:
-                return await self.async_step_room()
-            return await self.async_step_finish()
-        schema = vol.Schema({vol.Required("add_another", default=False): bool})
-        return self.async_show_form(
-            step_id="room_menu",
-            data_schema=schema,
-            description_placeholders={"count": str(len(self._rooms))},
-        )
+            room_id = user_input["room"]
+            if user_input["action"] == "delete":
+                self._rooms = [r for r in self._rooms if r[CONF_ROOM_ID] != room_id]
+                if self._default_room == room_id:
+                    self._default_room = self._rooms[0][CONF_ROOM_ID] if self._rooms else None
+                return self._save()
+            # edit
+            room = next(r for r in self._rooms if r[CONF_ROOM_ID] == room_id)
+            self._editing_id = room_id
+            self._current_room = dict(room)
+            return await self._room_form(None, defaults=room)
 
-    # --- Step: finishing settings + validation ------------------------------
-
-    async def async_step_finish(self, user_input: dict | None = None):
-        errors: dict[str, str] = {}
         room_options = [
             {"value": r[CONF_ROOM_ID], "label": r[CONF_ROOM_NAME]} for r in self._rooms
         ]
+        schema = vol.Schema(
+            {
+                vol.Required("room"): selector.SelectSelector(
+                    selector.SelectSelectorConfig(options=room_options)
+                ),
+                vol.Required("action", default="edit"): selector.SelectSelector(
+                    selector.SelectSelectorConfig(
+                        options=["edit", "delete"], translation_key="room_action"
+                    )
+                ),
+            }
+        )
+        return self.async_show_form(step_id="manage_rooms", data_schema=schema)
 
+    # --- General settings ----------------------------------------------------
+
+    async def async_step_settings(self, user_input: dict | None = None):
+        errors: dict[str, str] = {}
         if user_input is not None:
-            self._data[CONF_ROOMS] = self._rooms
-            self._data[CONF_DEFAULT_ROOM] = user_input.get(CONF_DEFAULT_ROOM)
-            self._data[CONF_NOTIFICATIONS] = {
+            self._default_room = user_input.get(CONF_DEFAULT_ROOM)
+            self._notify_services = user_input.get(CONF_NOTIFY_SERVICES, [])
+            self._notifications = {
                 kind: user_input.get(f"notify_{kind}", True) for kind in NOTIFICATION_KINDS
             }
             sunny = {CONF_SUNNY_ENABLED: user_input.get(CONF_SUNNY_ENABLED, False)}
@@ -278,83 +383,63 @@ class PrecisionClimateConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                         CONF_SUNNY_END_MIN: DEFAULT_SUNNY_END_MIN,
                     }
                 )
-            self._data[CONF_SUNNY_DAY] = sunny
+            self._sunny = sunny
 
-            schedules = _rooms_to_schedules(self._rooms)
-            blocking, _warnings = validate(schedules, self._data[CONF_DEFAULT_ROOM])
-            if blocking:
-                errors["base"] = "config_invalid"
-                self._schedule_detail = "; ".join(blocking)
-            else:
-                return self.async_create_entry(title="Precision Climate", data=self._data)
-
-        schema_dict: dict = {
-            vol.Optional(CONF_DEFAULT_ROOM): selector.SelectSelector(
-                selector.SelectSelectorConfig(options=room_options)
-            ),
-            vol.Required(CONF_SUNNY_ENABLED, default=False): bool,
-            vol.Optional(CONF_SUNNY_FORECAST_ENTITY): _entity_picker("sensor"),
-            vol.Optional(CONF_SUNNY_MIN_HOURS, default=7): selector.NumberSelector(
-                selector.NumberSelectorConfig(min=0, max=24, step=0.5, mode="box")
-            ),
-            vol.Optional(CONF_SUNNY_TARGET, default=DEFAULT_SUNNY_TARGET): selector.NumberSelector(
-                selector.NumberSelectorConfig(min=5.0, max=25.0, step=0.5, mode="box", unit_of_measurement="°C")
-            ),
-        }
-        for kind in NOTIFICATION_KINDS:
-            schema_dict[vol.Required(f"notify_{kind}", default=True)] = bool
-
-        return self.async_show_form(
-            step_id="finish",
-            data_schema=vol.Schema(schema_dict),
-            errors=errors,
-            description_placeholders={"detail": getattr(self, "_schedule_detail", "")},
-        )
-
-    @staticmethod
-    @callback
-    def async_get_options_flow(config_entry):
-        return PrecisionClimateOptionsFlow(config_entry)
-
-
-class PrecisionClimateOptionsFlow(config_entries.OptionsFlow):
-    """Lightweight options: toggle notifications, default room, sunny day."""
-
-    def __init__(self, config_entry) -> None:
-        self.config_entry = config_entry
-
-    async def async_step_init(self, user_input: dict | None = None):
-        data = {**self.config_entry.data, **self.config_entry.options}
-        rooms = data.get(CONF_ROOMS, [])
-        notifications = data.get(CONF_NOTIFICATIONS, {})
-        sunny = data.get(CONF_SUNNY_DAY, {})
-
-        if user_input is not None:
-            new_options = dict(self.config_entry.options)
-            new_options[CONF_DEFAULT_ROOM] = user_input.get(CONF_DEFAULT_ROOM)
-            new_options[CONF_NOTIFICATIONS] = {
-                kind: user_input.get(f"notify_{kind}", True) for kind in NOTIFICATION_KINDS
-            }
-            new_sunny = dict(sunny)
-            new_sunny[CONF_SUNNY_ENABLED] = user_input.get(CONF_SUNNY_ENABLED, False)
-            new_options[CONF_SUNNY_DAY] = new_sunny
-            return self.async_create_entry(title="", data=new_options)
+            # Validate the whole configuration before saving.
+            if self._rooms:
+                blocking, _warnings = validate(
+                    _rooms_to_schedules(self._rooms), self._default_room
+                )
+                if blocking:
+                    errors["base"] = "config_invalid"
+                    self._detail = "; ".join(blocking)
+            if not errors:
+                return self._save()
 
         room_options = [
-            {"value": r[CONF_ROOM_ID], "label": r[CONF_ROOM_NAME]} for r in rooms
+            {"value": r[CONF_ROOM_ID], "label": r[CONF_ROOM_NAME]} for r in self._rooms
         ]
-        schema_dict: dict = {
-            vol.Optional(
-                CONF_DEFAULT_ROOM, default=data.get(CONF_DEFAULT_ROOM)
-            ): selector.SelectSelector(
+        schema_dict: dict = {}
+        if room_options:
+            default_room = self._default_room if self._default_room in {
+                r[CONF_ROOM_ID] for r in self._rooms
+            } else None
+            key = (
+                vol.Optional(CONF_DEFAULT_ROOM, default=default_room)
+                if default_room
+                else vol.Optional(CONF_DEFAULT_ROOM)
+            )
+            schema_dict[key] = selector.SelectSelector(
                 selector.SelectSelectorConfig(options=room_options)
-            ),
+            )
+        schema_dict[
+            vol.Optional(CONF_NOTIFY_SERVICES, default=self._notify_services)
+        ] = _notify_services_selector(self.hass)
+        schema_dict.update({
             vol.Required(
-                CONF_SUNNY_ENABLED, default=sunny.get(CONF_SUNNY_ENABLED, False)
+                CONF_SUNNY_ENABLED, default=self._sunny.get(CONF_SUNNY_ENABLED, False)
             ): bool,
-        }
+            vol.Optional(
+                CONF_SUNNY_FORECAST_ENTITY,
+                default=self._sunny.get(CONF_SUNNY_FORECAST_ENTITY, ""),
+            ): _entity_picker("sensor"),
+            vol.Optional(
+                CONF_SUNNY_MIN_HOURS, default=self._sunny.get(CONF_SUNNY_MIN_HOURS, 7)
+            ): selector.NumberSelector(
+                selector.NumberSelectorConfig(min=0, max=24, step=0.5, mode="box")
+            ),
+            vol.Optional(
+                CONF_SUNNY_TARGET, default=self._sunny.get(CONF_SUNNY_TARGET, DEFAULT_SUNNY_TARGET)
+            ): _temp_number(),
+        })
         for kind in NOTIFICATION_KINDS:
             schema_dict[
-                vol.Required(f"notify_{kind}", default=notifications.get(kind, True))
+                vol.Required(f"notify_{kind}", default=self._notifications.get(kind, True))
             ] = bool
-        return self.async_show_form(step_id="init", data_schema=vol.Schema(schema_dict))
+
+        return self.async_show_form(
+            step_id="settings",
+            data_schema=vol.Schema(schema_dict),
+            errors=errors,
+            description_placeholders={"detail": self._detail},
+        )

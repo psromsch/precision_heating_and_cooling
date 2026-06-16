@@ -377,12 +377,12 @@ class PrecisionClimateCoordinator:
         if not self.config.notifications.get(kind, True):
             return
         _LOGGER.warning("[%s] %s", kind, message)
-        if self.config.notify_service:
-            domain, _, service = self.config.notify_service.partition(".")
+        for notify_service in self.config.notify_services:
+            domain, _, service = notify_service.partition(".")
             self.hass.async_create_task(
                 self.hass.services.async_call(
                     domain or "notify",
-                    service or self.config.notify_service,
+                    service or notify_service,
                     {"title": "Precision Climate", "message": message},
                     blocking=False,
                 )

@@ -1,0 +1,114 @@
+# =============================================================================
+# OLD (YAML) vs NEW (precision_climate integration) decision comparison.
+#
+# Both systems see the SAME real thermometers, but drive different actuators:
+#   OLD -> real boiler  switch.wifi_smart_switch_2   + real TRVs
+#   NEW -> dummy boiler switch.wifi_smart_switch_2_dummy + dummy TRVs
+#
+# This file watches both and tells you ONLY when they disagree, so you never
+# have to open entity-by-entity history. It touches nothing real.
+#
+# -----------------------------------------------------------------------------
+# BEFORE USING: verify the NEW integration's entity_ids.
+# Go to Developer Tools > States and filter for "dummy_heating" / "dummy_target".
+# Update the three room rows below if the ids differ from the guesses:
+#     binary_sensor.master_dummy_heating
+#     binary_sensor.pieza_1_dummy_heating
+#     binary_sensor.living_dummy_heating
+# The BOILER comparison uses exact ids and needs no editing.
+# =============================================================================
+
+template:
+  - binary_sensor:
+      # --- Boiler: the single most important decision ----------------------
+      - name: "Heating Boiler Mismatch"
+        unique_id: heating_boiler_mismatch
+        device_class: problem
+        # ON when the two systems disagree about running the boiler.
+        state: >
+          {{ is_state('switch.wifi_smart_switch_2', 'on')
+             != is_state('switch.wifi_smart_switch_2_dummy', 'on') }}
+        attributes:
+          old_boiler: "{{ states('switch.wifi_smart_switch_2') }}"
+          new_boiler: "{{ states('switch.wifi_smart_switch_2_dummy') }}"
+
+      # --- Per-room heating intent ----------------------------------------
+      - name: "Master Bedroom Heating Mismatch"
+        unique_id: master_bedroom_heating_mismatch
+        device_class: problem
+        state: >
+          {{ is_state('binary_sensor.master_bedroom_heating', 'on')
+             != is_state('binary_sensor.master_dummy_heating', 'on') }}
+        attributes:
+          old: "{{ states('binary_sensor.master_bedroom_heating') }}"
+          new: "{{ states('binary_sensor.master_dummy_heating') }}"
+
+      - name: "Pieza 1 Heating Mismatch"
+        unique_id: pieza_1_heating_mismatch
+        device_class: problem
+        state: >
+          {{ is_state('binary_sensor.pieza_1_heating', 'on')
+             != is_state('binary_sensor.pieza_1_dummy_heating', 'on') }}
+        attributes:
+          old: "{{ states('binary_sensor.pieza_1_heating') }}"
+          new: "{{ states('binary_sensor.pieza_1_dummy_heating') }}"
+
+      - name: "Living Heating Mismatch"
+        unique_id: living_heating_mismatch
+        device_class: problem
+        state: >
+          {{ is_state('binary_sensor.comedor_heating', 'on')
+             != is_state('binary_sensor.living_dummy_heating', 'on') }}
+        attributes:
+          old: "{{ states('binary_sensor.comedor_heating') }}"
+          new: "{{ states('binary_sensor.living_dummy_heating') }}"
+
+  - sensor:
+      # --- One sensor to chart: how many decisions currently disagree ------
+      # Open History on THIS sensor to see every divergence with timestamps.
+      - name: "Heating Comparison Summary"
+        unique_id: heating_comparison_summary
+        icon: mdi:ab-testing
+        state: >
+          {{ ['binary_sensor.heating_boiler_mismatch',
+              'binary_sensor.master_bedroom_heating_mismatch',
+              'binary_sensor.pieza_1_heating_mismatch',
+              'binary_sensor.living_heating_mismatch']
+             | select('is_state', 'on') | list | count }}
+        attributes:
+          mismatched: >
+            {{ ['boiler' if is_state('binary_sensor.heating_boiler_mismatch','on') else '',
+                'master' if is_state('binary_sensor.master_bedroom_heating_mismatch','on') else '',
+                'pieza_1' if is_state('binary_sensor.pieza_1_heating_mismatch','on') else '',
+                'living' if is_state('binary_sensor.living_heating_mismatch','on') else '']
+               | reject('eq','') | list | join(', ') }}
+          boiler_old: "{{ states('switch.wifi_smart_switch_2') }}"
+          boiler_new: "{{ states('switch.wifi_smart_switch_2_dummy') }}"
+
+automation:
+  # Notify only when a disagreement PERSISTS, so the brief windows where the two
+  # systems re-evaluate a moment apart don't spam you. Tune "for" if needed.
+  - id: heating_comparison_mismatch_alert
+    alias: "Heating comparison: sustained mismatch"
+    mode: single
+    trigger:
+      - platform: numeric_state
+        entity_id: sensor.heating_comparison_summary
+        above: 0
+        for:
+          minutes: 3
+    action:
+      - service: logbook.log
+        data:
+          name: "Heating comparison"
+          message: >
+            OLD vs NEW disagree on:
+            {{ state_attr('sensor.heating_comparison_summary', 'mismatched') }}
+            (boiler old={{ states('switch.wifi_smart_switch_2') }},
+             new={{ states('switch.wifi_smart_switch_2_dummy') }})
+      # Optional push notification — uncomment and set your notify service:
+      # - service: notify.mobile_app_your_phone
+      #   data:
+      #     title: "Heating systems disagree"
+      #     message: >
+      #       {{ state_attr('sensor.heating_comparison_summary', 'mismatched') }}

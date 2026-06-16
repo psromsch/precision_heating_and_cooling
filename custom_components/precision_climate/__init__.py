@@ -16,6 +16,7 @@ if TYPE_CHECKING:
 PLATFORMS: list[str] = ["switch", "binary_sensor", "sensor"]
 
 SERVICE_SET_SCHEDULE = "set_schedule"
+SERVICE_SET_ROOM_PAUSE = "set_room_pause"
 CARD_URL = f"/{DOMAIN}/precision-climate-schedule-card.js"
 CARD_FILENAME = "precision-climate-schedule-card.js"
 
@@ -54,6 +55,7 @@ def _async_cleanup_orphan_entities(hass, entry, coordinator) -> None:
     for room in coordinator.config.rooms:
         valid.add(f"{entry_id}_{room.room_id}_target")
         valid.add(f"{entry_id}_{room.room_id}_heating")
+        valid.add(f"{entry_id}_{room.room_id}_pause")
 
     registry = er.async_get(hass)
     for ent in list(registry.entities.values()):
@@ -122,6 +124,29 @@ def _async_register_services(hass: HomeAssistant) -> None:
 
     hass.services.async_register(
         DOMAIN, SERVICE_SET_SCHEDULE, _handle_set_schedule, schema=schema
+    )
+
+    pause_schema = vol.Schema(
+        {
+            vol.Required("room_id"): str,
+            vol.Required("paused"): vol.Coerce(bool),
+        }
+    )
+
+    async def _handle_set_room_pause(call: "ServiceCall") -> None:
+        room_id = call.data["room_id"]
+        paused = call.data["paused"]
+        for entry in hass.config_entries.async_entries(DOMAIN):
+            coordinator = hass.data.get(DOMAIN, {}).get(entry.entry_id)
+            if coordinator is None:
+                continue
+            if any(r.room_id == room_id for r in coordinator.config.rooms):
+                await coordinator.async_set_room_paused(room_id, paused)
+                return
+        raise vol.Invalid(f"No configured room '{room_id}' found")
+
+    hass.services.async_register(
+        DOMAIN, SERVICE_SET_ROOM_PAUSE, _handle_set_room_pause, schema=pause_schema
     )
 
 

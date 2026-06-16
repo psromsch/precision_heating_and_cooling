@@ -53,6 +53,7 @@ class SystemStatusSensor(PrecisionBaseEntity, SensorEntity):
                 "active": c.resolved_active.get(rid),
                 "trv_open": c.trv_open.get(rid),
                 "heating": c.room_heating.get(rid),
+                "paused": c.room_paused(rid),
             }
         return {
             "boiler_on": c.boiler_on,

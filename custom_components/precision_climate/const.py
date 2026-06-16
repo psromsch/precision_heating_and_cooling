@@ -30,6 +30,10 @@ TRV_BLOCK_FLOW_HEAT = 4.0   # set this to fully CLOSE a TRV when heating
 TRV_FORCE_FLOW_COOL = 4.0
 TRV_BLOCK_FLOW_COOL = 28.0
 
+# When a room is paused, its effective target drops to this so it stops calling
+# for heat until resumed (the schedule itself is untouched).
+PAUSE_TARGET = 5.0
+
 
 def force_flow_setpoint(mode: Mode) -> float:
     """Return the TRV setpoint that fully opens the valve for the given mode."""

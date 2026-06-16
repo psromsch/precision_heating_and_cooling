@@ -414,7 +414,7 @@ class PrecisionClimateOptionsFlow(config_entries.OptionsFlow):
             )
         schema_dict[
             vol.Optional(CONF_NOTIFY_SERVICES, default=self._notify_services)
-        ] = _notify_services_selector(self.hass)
+        ] = _notify_services_selector(self.config_entry.hass)
         schema_dict.update({
             vol.Required(
                 CONF_SUNNY_ENABLED, default=self._sunny.get(CONF_SUNNY_ENABLED, False)

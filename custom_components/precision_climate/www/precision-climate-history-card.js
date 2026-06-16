@@ -23,7 +23,7 @@
  * No build step, no external dependencies.
  */
 
-const HISTORY_CARD_VERSION = "0.2.7";
+const HISTORY_CARD_VERSION = "0.2.8";
 
 // Per-room line colours, assigned round-robin in discovery order.
 const ROOM_COLORS = [
@@ -189,19 +189,16 @@ class PrecisionClimateHistoryCard extends HTMLElement {
 
   _renderRoom(name, info, color, t0, now) {
     const W = 1000;
-    const H = 180;
-    const padL = 4;
-    const padR = 4;
-    const padT = 8;
-    const padB = 18;
-    const innerW = W - padL - padR;
+    const H = 160;
+    const padT = 6;
+    const padB = 6;
     const innerH = H - padT - padB;
 
     const tempPts = this._numericPoints(info.thermometer_entity_id, t0, now);
     const targetPts = this._numericPoints(info.target_entity_id, t0, now);
     const heatRanges = this._onRanges(info.heating_entity_id, t0, now);
 
-    const xs = (t) => padL + ((t - t0) / (now - t0)) * innerW;
+    const xs = (t) => ((t - t0) / (now - t0)) * W;
 
     // Shared y-scale across temp + target so both line up.
     const allV = [...tempPts.map((p) => p.v), ...targetPts.map((p) => p.v)];
@@ -237,21 +234,33 @@ class PrecisionClimateHistoryCard extends HTMLElement {
       `<span class="pch-stat" style="color:${color}">${curTemp != null ? curTemp.toFixed(1) + "°" : "—"}</span>` +
       `<span class="pch-stat pch-target-stat">target ${curTarget != null ? curTarget.toFixed(1) + "°" : "—"}</span>`;
 
+    // Y-axis labels rendered as HTML (outside SVG) so they don't distort with
+    // preserveAspectRatio="none" scaling. Shown on both left and right sides.
+    const yAxisHtml = (cls) => `
+      <div class="${cls}">
+        <span>${hi.toFixed(1)}</span>
+        <span>${lo.toFixed(1)}</span>
+      </div>`;
+
     return `
       <div class="pch-room">
         <div class="pch-room-head">
           <span><span class="pch-dot" style="background:${color}"></span>${name}</span>
           <span class="pch-stats">${stats}</span>
         </div>
-        <svg class="pch-svg" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none">
-          ${grid}
-          ${bands}
-          <path d="${targetPath}" fill="none" stroke="var(--error-color,#d9663b)" stroke-width="2" vector-effect="non-scaling-stroke"/>
-          <path d="${tempPath}" fill="none" stroke="${color}" stroke-width="2.5" vector-effect="non-scaling-stroke" stroke-linejoin="round"/>
-          <text x="${padL + 2}" y="${padT + 10}" class="pch-axis-lbl">${hi.toFixed(1)}</text>
-          <text x="${padL + 2}" y="${padT + innerH - 2}" class="pch-axis-lbl">${lo.toFixed(1)}</text>
-        </svg>
-        <div class="pch-time-axis">${this._timeLabels(t0, now)}</div>
+        <div class="pch-chart-wrap">
+          ${yAxisHtml("pch-yaxis")}
+          <div class="pch-chart-area">
+            <svg class="pch-svg" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none">
+              ${grid}
+              ${bands}
+              <path d="${targetPath}" fill="none" stroke="var(--error-color,#d9663b)" stroke-width="2" vector-effect="non-scaling-stroke"/>
+              <path d="${tempPath}" fill="none" stroke="${color}" stroke-width="2.5" vector-effect="non-scaling-stroke" stroke-linejoin="round"/>
+            </svg>
+            <div class="pch-time-axis">${this._timeLabels(t0, now)}</div>
+          </div>
+          ${yAxisHtml("pch-yaxis pch-yaxis-right")}
+        </div>
       </div>`;
   }
 
@@ -350,10 +359,21 @@ const STYLE = `
   .pch-stats { font-weight: 400; }
   .pch-stat { font-weight: 600; margin-left: 8px; }
   .pch-target-stat { color: var(--error-color, #d9663b); opacity: .9; }
-  .pch-svg { width: 100%; height: 150px; display: block; background: var(--card-background-color, #1c1c1c); border-radius: 6px; }
+
+  /* Chart layout: [y-axis] [svg+time-axis] [y-axis] */
+  .pch-chart-wrap { display: flex; align-items: stretch; gap: 4px; }
+  .pch-yaxis {
+    display: flex; flex-direction: column; justify-content: space-between;
+    font-size: .72em; opacity: .6; min-width: 30px;
+    text-align: right; padding-bottom: 16px; /* align with SVG, not time axis */
+    color: var(--secondary-text-color, #999);
+  }
+  .pch-yaxis-right { text-align: left; }
+  .pch-chart-area { flex: 1; min-width: 0; }
+
+  .pch-svg { width: 100%; height: 140px; display: block; background: var(--secondary-background-color, #1c1c1c); border-radius: 6px; }
   .pch-boiler-svg { height: 22px; }
-  .pch-axis-lbl { fill: var(--secondary-text-color, #999); font-size: 26px; opacity: .7; }
-  .pch-time-axis { position: relative; height: 14px; font-size: .72em; opacity: .55; margin-top: 1px; }
+  .pch-time-axis { position: relative; height: 16px; font-size: .72em; opacity: .55; margin-top: 2px; }
   .pch-time-axis span { position: absolute; transform: translateX(-50%); }
   .pch-nodata, .pch-empty { opacity: .6; font-size: .85em; padding: 8px 0; }
   .pch-error { color: var(--error-color, #d9663b); font-size: .85em; margin-bottom: 8px; }

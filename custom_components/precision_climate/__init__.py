@@ -17,8 +17,11 @@ PLATFORMS: list[str] = ["switch", "binary_sensor", "sensor"]
 
 SERVICE_SET_SCHEDULE = "set_schedule"
 SERVICE_SET_ROOM_PAUSE = "set_room_pause"
-CARD_URL = f"/{DOMAIN}/precision-climate-schedule-card.js"
-CARD_FILENAME = "precision-climate-schedule-card.js"
+# Frontend modules served and auto-loaded by the integration.
+CARD_FILENAMES = [
+    "precision-climate-schedule-card.js",
+    "precision-climate-history-card.js",
+]
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
@@ -151,29 +154,34 @@ def _async_register_services(hass: HomeAssistant) -> None:
 
 
 async def _async_register_card(hass: HomeAssistant) -> None:
-    """Serve and auto-load the visual schedule card as a frontend module."""
+    """Serve and auto-load the visual cards as frontend modules."""
     if hass.data.get(f"{DOMAIN}_card_registered"):
         return
     hass.data[f"{DOMAIN}_card_registered"] = True
 
-    card_path = os.path.join(os.path.dirname(__file__), "www", CARD_FILENAME)
+    version = _manifest_version()
+    www_dir = os.path.join(os.path.dirname(__file__), "www")
 
-    try:
-        from homeassistant.components.http import StaticPathConfig
+    for filename in CARD_FILENAMES:
+        url = f"/{DOMAIN}/{filename}"
+        card_path = os.path.join(www_dir, filename)
 
-        await hass.http.async_register_static_paths(
-            [StaticPathConfig(CARD_URL, card_path, False)]
-        )
-    except ImportError:
-        # Fallback for very old cores.
-        hass.http.register_static_path(CARD_URL, card_path, False)
+        try:
+            from homeassistant.components.http import StaticPathConfig
 
-    try:
-        from homeassistant.components.frontend import add_extra_js_url
+            await hass.http.async_register_static_paths(
+                [StaticPathConfig(url, card_path, False)]
+            )
+        except ImportError:
+            # Fallback for very old cores.
+            hass.http.register_static_path(url, card_path, False)
 
-        add_extra_js_url(hass, f"{CARD_URL}?v={_manifest_version()}")
-    except Exception:  # noqa: BLE001 - frontend not loaded; card can be added manually
-        pass
+        try:
+            from homeassistant.components.frontend import add_extra_js_url
+
+            add_extra_js_url(hass, f"{url}?v={version}")
+        except Exception:  # noqa: BLE001 - frontend not loaded; cards can be added manually
+            pass
 
 
 def _manifest_version() -> str:

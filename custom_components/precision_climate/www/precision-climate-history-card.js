@@ -1,0 +1,370 @@
+/*
+ * Precision Climate — history card.
+ *
+ * A companion to the schedule card. For each configured room it draws a 24h
+ * (configurable) chart with:
+ *   - measured room temperature (solid line),
+ *   - the effective schedule target (red stepline),
+ *   - a translucent band over the periods the room was actively heating.
+ *
+ * Rooms, their thermometer, their target sensor and their heating sensor are
+ * all auto-discovered from the precision_climate status sensor, so no per-room
+ * dashboard configuration is needed.
+ *
+ * History is read from Home Assistant's recorder via the
+ * history/history_during_period WebSocket command. No external chart library,
+ * no build step, no extra HACS dependency.
+ *
+ * Usage in a dashboard:
+ *   type: custom:precision-climate-history-card
+ *   hours: 24            # optional, default 24
+ *   entity: sensor.precision_climate_status   # optional; auto-detected
+ *
+ * No build step, no external dependencies.
+ */
+
+const HISTORY_CARD_VERSION = "0.2.7";
+
+// Per-room line colours, assigned round-robin in discovery order.
+const ROOM_COLORS = [
+  "#ff9800", "#7cd34a", "#22d3ee", "#eab308", "#e879f9", "#60a5fa", "#f87171",
+];
+
+const pad = (n) => String(n).padStart(2, "0");
+
+class PrecisionClimateHistoryCard extends HTMLElement {
+  setConfig(config) {
+    this._config = config || {};
+    this._hours = Number(config && config.hours) || 24;
+    this._history = null; // { [entity_id]: [{t: ms, v: number|string}] }
+    this._loading = false;
+    this._error = null;
+    this._lastFetch = 0;
+  }
+
+  connectedCallback() {
+    // Refresh history periodically while the card is on screen.
+    this._timerId = setInterval(() => this._maybeFetch(true), 60000);
+  }
+
+  disconnectedCallback() {
+    clearInterval(this._timerId);
+  }
+
+  set hass(hass) {
+    this._hass = hass;
+    this._maybeFetch(false);
+    this._render();
+  }
+
+  getCardSize() {
+    return 8;
+  }
+
+  _statusState() {
+    if (this._config.entity) return this._hass.states[this._config.entity] || null;
+    const states = this._hass.states;
+    for (const id of Object.keys(states)) {
+      const s = states[id];
+      if (id.startsWith("sensor.") && s.attributes && s.attributes.schedules) return s;
+    }
+    return null;
+  }
+
+  // Collect every entity_id we need to chart, across all rooms + the boiler.
+  _entityIds(status) {
+    const ids = new Set();
+    const rooms = status ? status.attributes.rooms || {} : {};
+    for (const name of Object.keys(rooms)) {
+      const r = rooms[name];
+      if (r.thermometer_entity_id) ids.add(r.thermometer_entity_id);
+      if (r.target_entity_id) ids.add(r.target_entity_id);
+      if (r.heating_entity_id) ids.add(r.heating_entity_id);
+    }
+    const boiler = status && status.attributes.boiler_switch_entity_id;
+    if (boiler) ids.add(boiler);
+    return [...ids];
+  }
+
+  async _maybeFetch(force) {
+    if (!this._hass || this._loading) return;
+    const status = this._statusState();
+    if (!status) return;
+    const ids = this._entityIds(status);
+    if (!ids.length) return;
+    // Throttle: only refetch on demand, on (re)connect, or every ~60s.
+    const now = Date.now();
+    if (!force && this._history && now - this._lastFetch < 55000) return;
+
+    this._loading = true;
+    this._lastFetch = now;
+    const start = new Date(now - this._hours * 3600 * 1000).toISOString();
+    const end = new Date(now).toISOString();
+    try {
+      const result = await this._hass.callWS({
+        type: "history/history_during_period",
+        start_time: start,
+        end_time: end,
+        entity_ids: ids,
+        minimal_response: true,
+        no_attributes: true,
+        significant_changes_only: false,
+      });
+      const parsed = {};
+      for (const eid of Object.keys(result || {})) {
+        parsed[eid] = (result[eid] || [])
+          .map((p) => ({ t: (p.lu ? p.lu * 1000 : Date.parse(p.last_updated)), v: p.s !== undefined ? p.s : p.state }))
+          .filter((p) => !Number.isNaN(p.t));
+      }
+      this._history = parsed;
+      this._error = null;
+    } catch (err) {
+      this._error = (err && err.message) || "Could not load history.";
+    } finally {
+      this._loading = false;
+      this._render();
+    }
+  }
+
+  _render() {
+    if (!this._hass) return;
+    const status = this._statusState();
+
+    if (!this._root) {
+      this._root = document.createElement("ha-card");
+      this._root.header = "Precision Climate — History";
+      this._style = document.createElement("style");
+      this._style.textContent = STYLE;
+      this._body = document.createElement("div");
+      this._body.className = "pch-body";
+      this._root.appendChild(this._style);
+      this._root.appendChild(this._body);
+      this.innerHTML = "";
+      this.appendChild(this._root);
+    }
+
+    if (!status) {
+      this._body.innerHTML = `<div class="pch-empty">No Precision Climate status sensor found.</div>`;
+      return;
+    }
+
+    const rooms = status.attributes.rooms || {};
+    const names = Object.keys(rooms);
+    if (!names.length) {
+      this._body.innerHTML = `<div class="pch-empty">No rooms configured yet.</div>`;
+      return;
+    }
+
+    const now = Date.now();
+    const t0 = now - this._hours * 3600 * 1000;
+
+    let html = "";
+    if (this._error) html += `<div class="pch-error">${this._error}</div>`;
+    if (!this._history && this._loading) html += `<div class="pch-empty">Loading history…</div>`;
+
+    // Optional boiler strip.
+    const boilerId = status.attributes.boiler_switch_entity_id;
+    if (boilerId && this._history && this._history[boilerId]) {
+      html += this._renderBoilerStrip(this._history[boilerId], t0, now);
+    }
+
+    names.forEach((name, i) => {
+      html += this._renderRoom(name, rooms[name], ROOM_COLORS[i % ROOM_COLORS.length], t0, now);
+    });
+
+    html += `<div class="pch-version">history v${HISTORY_CARD_VERSION}</div>`;
+    this._body.innerHTML = html;
+  }
+
+  _series(entityId) {
+    return (this._history && this._history[entityId]) || [];
+  }
+
+  // Build an array of numeric points clamped to [t0, now].
+  _numericPoints(entityId, t0, now) {
+    return this._series(entityId)
+      .map((p) => ({ t: p.t, v: parseFloat(p.v) }))
+      .filter((p) => !Number.isNaN(p.v) && p.t >= t0 - 3600000 && p.t <= now);
+  }
+
+  _renderRoom(name, info, color, t0, now) {
+    const W = 1000;
+    const H = 180;
+    const padL = 4;
+    const padR = 4;
+    const padT = 8;
+    const padB = 18;
+    const innerW = W - padL - padR;
+    const innerH = H - padT - padB;
+
+    const tempPts = this._numericPoints(info.thermometer_entity_id, t0, now);
+    const targetPts = this._numericPoints(info.target_entity_id, t0, now);
+    const heatRanges = this._onRanges(info.heating_entity_id, t0, now);
+
+    const xs = (t) => padL + ((t - t0) / (now - t0)) * innerW;
+
+    // Shared y-scale across temp + target so both line up.
+    const allV = [...tempPts.map((p) => p.v), ...targetPts.map((p) => p.v)];
+    if (!allV.length) {
+      return `<div class="pch-room"><div class="pch-room-head"><span class="pch-dot" style="background:${color}"></span>${name}</div><div class="pch-nodata">No data in the last ${this._hours}h.</div></div>`;
+    }
+    let lo = Math.min(...allV);
+    let hi = Math.max(...allV);
+    if (hi - lo < 2) { const m = (hi + lo) / 2; lo = m - 1; hi = m + 1; }
+    lo -= 0.4; hi += 0.4;
+    const ys = (v) => padT + (1 - (v - lo) / (hi - lo)) * innerH;
+
+    // Heating bands.
+    const bands = heatRanges
+      .map((r) => {
+        const x1 = xs(Math.max(r.start, t0));
+        const x2 = xs(Math.min(r.end, now));
+        return `<rect x="${x1.toFixed(1)}" y="${padT}" width="${Math.max(0, x2 - x1).toFixed(1)}" height="${innerH}" fill="${color}" opacity="0.18"/>`;
+      })
+      .join("");
+
+    // Target stepline (hold each value until the next sample).
+    const targetPath = this._steplinePath(targetPts, xs, ys, now);
+    // Temperature smooth line.
+    const tempPath = this._linePath(tempPts, xs, ys);
+
+    // Hour gridlines every 6h.
+    const grid = this._hourGrid(t0, now, xs, padT, innerH);
+
+    const curTemp = tempPts.length ? tempPts[tempPts.length - 1].v : null;
+    const curTarget = targetPts.length ? targetPts[targetPts.length - 1].v : null;
+    const stats =
+      `<span class="pch-stat" style="color:${color}">${curTemp != null ? curTemp.toFixed(1) + "°" : "—"}</span>` +
+      `<span class="pch-stat pch-target-stat">target ${curTarget != null ? curTarget.toFixed(1) + "°" : "—"}</span>`;
+
+    return `
+      <div class="pch-room">
+        <div class="pch-room-head">
+          <span><span class="pch-dot" style="background:${color}"></span>${name}</span>
+          <span class="pch-stats">${stats}</span>
+        </div>
+        <svg class="pch-svg" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none">
+          ${grid}
+          ${bands}
+          <path d="${targetPath}" fill="none" stroke="var(--error-color,#d9663b)" stroke-width="2" vector-effect="non-scaling-stroke"/>
+          <path d="${tempPath}" fill="none" stroke="${color}" stroke-width="2.5" vector-effect="non-scaling-stroke" stroke-linejoin="round"/>
+          <text x="${padL + 2}" y="${padT + 10}" class="pch-axis-lbl">${hi.toFixed(1)}</text>
+          <text x="${padL + 2}" y="${padT + innerH - 2}" class="pch-axis-lbl">${lo.toFixed(1)}</text>
+        </svg>
+        <div class="pch-time-axis">${this._timeLabels(t0, now)}</div>
+      </div>`;
+  }
+
+  _renderBoilerStrip(series, t0, now) {
+    const W = 1000;
+    const H = 22;
+    const ranges = this._onRangesFromSeries(series, t0, now, "on");
+    const xs = (t) => ((t - t0) / (now - t0)) * W;
+    const bands = ranges
+      .map((r) => {
+        const x1 = xs(Math.max(r.start, t0));
+        const x2 = xs(Math.min(r.end, now));
+        return `<rect x="${x1.toFixed(1)}" y="0" width="${Math.max(0, x2 - x1).toFixed(1)}" height="${H}" fill="var(--error-color,#d9663b)" opacity="0.55"/>`;
+      })
+      .join("");
+    return `
+      <div class="pch-room pch-boiler">
+        <div class="pch-room-head"><span>🔥 Boiler</span></div>
+        <svg class="pch-svg pch-boiler-svg" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none">
+          <rect x="0" y="0" width="${W}" height="${H}" fill="var(--divider-color,#444)" opacity="0.25"/>
+          ${bands}
+        </svg>
+      </div>`;
+  }
+
+  // --- geometry helpers ----------------------------------------------------
+
+  _linePath(pts, xs, ys) {
+    if (!pts.length) return "";
+    return pts.map((p, i) => `${i === 0 ? "M" : "L"}${xs(p.t).toFixed(1)},${ys(p.v).toFixed(1)}`).join(" ");
+  }
+
+  _steplinePath(pts, xs, ys, now) {
+    if (!pts.length) return "";
+    let d = "";
+    pts.forEach((p, i) => {
+      const x = xs(p.t).toFixed(1);
+      const y = ys(p.v).toFixed(1);
+      if (i === 0) d += `M${x},${y}`;
+      else d += ` L${x},${ys(pts[i - 1].v).toFixed(1)} L${x},${y}`;
+    });
+    // Hold the last value to the right edge.
+    const last = pts[pts.length - 1];
+    d += ` L${xs(now).toFixed(1)},${ys(last.v).toFixed(1)}`;
+    return d;
+  }
+
+  // Build [{start, end}] ranges where a binary entity was "on".
+  _onRanges(entityId, t0, now) {
+    return this._onRangesFromSeries(this._series(entityId), t0, now, "on");
+  }
+
+  _onRangesFromSeries(series, t0, now, onState) {
+    const ranges = [];
+    let open = null;
+    for (const p of series) {
+      const isOn = String(p.v).toLowerCase() === onState;
+      if (isOn && open === null) open = p.t;
+      else if (!isOn && open !== null) { ranges.push({ start: open, end: p.t }); open = null; }
+    }
+    if (open !== null) ranges.push({ start: open, end: now });
+    return ranges;
+  }
+
+  _hourGrid(t0, now, xs, padT, innerH) {
+    let g = "";
+    const startH = new Date(t0);
+    startH.setMinutes(0, 0, 0);
+    for (let t = startH.getTime(); t <= now; t += 6 * 3600 * 1000) {
+      if (t < t0) continue;
+      const x = xs(t).toFixed(1);
+      g += `<line x1="${x}" y1="${padT}" x2="${x}" y2="${padT + innerH}" stroke="var(--divider-color,#444)" stroke-width="1" opacity="0.4" vector-effect="non-scaling-stroke"/>`;
+    }
+    return g;
+  }
+
+  _timeLabels(t0, now) {
+    const labels = [];
+    const startH = new Date(t0);
+    startH.setMinutes(0, 0, 0);
+    for (let t = startH.getTime(); t <= now; t += 6 * 3600 * 1000) {
+      if (t < t0) continue;
+      const d = new Date(t);
+      const left = ((t - t0) / (now - t0)) * 100;
+      labels.push(`<span style="left:${left.toFixed(2)}%">${pad(d.getHours())}:00</span>`);
+    }
+    return labels.join("");
+  }
+}
+
+const STYLE = `
+  .pch-body { padding: 8px 14px 14px; }
+  .pch-room { margin-bottom: 14px; }
+  .pch-room-head { display: flex; align-items: center; justify-content: space-between; font-weight: 600; font-size: .95em; margin-bottom: 2px; }
+  .pch-dot { display: inline-block; width: 9px; height: 9px; border-radius: 50%; margin-right: 6px; vertical-align: middle; }
+  .pch-stats { font-weight: 400; }
+  .pch-stat { font-weight: 600; margin-left: 8px; }
+  .pch-target-stat { color: var(--error-color, #d9663b); opacity: .9; }
+  .pch-svg { width: 100%; height: 150px; display: block; background: var(--card-background-color, #1c1c1c); border-radius: 6px; }
+  .pch-boiler-svg { height: 22px; }
+  .pch-axis-lbl { fill: var(--secondary-text-color, #999); font-size: 26px; opacity: .7; }
+  .pch-time-axis { position: relative; height: 14px; font-size: .72em; opacity: .55; margin-top: 1px; }
+  .pch-time-axis span { position: absolute; transform: translateX(-50%); }
+  .pch-nodata, .pch-empty { opacity: .6; font-size: .85em; padding: 8px 0; }
+  .pch-error { color: var(--error-color, #d9663b); font-size: .85em; margin-bottom: 8px; }
+  .pch-version { text-align: right; font-size: .7em; opacity: .35; margin-top: 8px; }
+`;
+
+customElements.define("precision-climate-history-card", PrecisionClimateHistoryCard);
+
+window.customCards = window.customCards || [];
+window.customCards.push({
+  type: "precision-climate-history-card",
+  name: "Precision Climate History",
+  description: "Per-room temperature / target / heating history for Precision Climate.",
+});

@@ -333,11 +333,14 @@ class PrecisionClimateOptionsFlow(config_entries.OptionsFlow):
                 return self._save()
 
         # Pre-fill the textareas when editing an existing room.
+        # For new rooms (no existing blocks) seed a full-day active block at 18 °C
+        # so users can jump straight to the visual card without touching the text form.
         existing_blocks = self._current_room.get(CONF_SCHEDULE_BLOCKS, {})
+        _default_sched = "00:00-24:00 18 active"
         schema = vol.Schema(
             {
                 vol.Required(
-                    key, default=dicts_to_text(existing_blocks.get(key, []))
+                    key, default=dicts_to_text(existing_blocks.get(key, [])) or _default_sched
                 ): selector.TextSelector(selector.TextSelectorConfig(multiline=True))
                 for key in day_keys
             }

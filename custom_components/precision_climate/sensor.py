@@ -43,21 +43,38 @@ class SystemStatusSensor(PrecisionBaseEntity, SensorEntity):
 
     @property
     def extra_state_attributes(self) -> dict:
+        from homeassistant.helpers import entity_registry as er
+
         c = self._coordinator
+        registry = er.async_get(self.hass)
+        entry_id = self._attr_unique_id.removesuffix("_status")
+
+        def own_entity(suffix: str, domain: str) -> str | None:
+            """Resolve one of our own entities' current entity_id by unique_id."""
+            return registry.async_get_entity_id(domain, DOMAIN, f"{entry_id}_{suffix}")
+
         rooms = {}
         for room in c.config.rooms:
             rid = room.room_id
             rooms[room.name] = {
+                "room_id": rid,
                 "temperature": c.observed_temps.get(rid),
                 "target": c.resolved_targets.get(rid),
                 "active": c.resolved_active.get(rid),
                 "trv_open": c.trv_open.get(rid),
                 "heating": c.room_heating.get(rid),
                 "paused": c.room_paused(rid),
+                # Source entity_ids so the history card can plot recorded data
+                # without any per-room dashboard configuration.
+                "thermometer_entity_id": room.thermometer,
+                "target_entity_id": own_entity(f"{rid}_target", "sensor"),
+                "heating_entity_id": own_entity(f"{rid}_heating", "binary_sensor"),
             }
         return {
             "boiler_on": c.boiler_on,
             "master_on": c.master_on,
+            "master_switch_entity_id": own_entity("master", "switch"),
+            "boiler_switch_entity_id": c.config.boiler_switch,
             "paused": c.paused,
             "rooms": rooms,
             # Consumed by the visual schedule card to render/edit schedules.

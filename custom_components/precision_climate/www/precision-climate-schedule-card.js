@@ -30,7 +30,7 @@ const DAY_ORDER = ["all", "weekday", "weekend", "mon", "tue", "wed", "thu", "fri
 
 // Shown in the card footer so you can confirm which card version is live
 // after a HACS update (keep in sync with manifest.json).
-const CARD_VERSION = "0.2.6";
+const CARD_VERSION = "0.2.7";
 
 const pad = (n) => String(n).padStart(2, "0");
 const minToHHMM = (m) => {
@@ -55,6 +55,7 @@ class PrecisionClimateScheduleCard extends HTMLElement {
     this._config = config || {};
     this._edit = null; // { room_id, day_key, blocks: [...] }
     this._error = null;
+    this._confirmMaster = null; // { want: bool, entityId: string } while confirmation is pending
   }
 
   connectedCallback() {
@@ -195,12 +196,17 @@ class PrecisionClimateScheduleCard extends HTMLElement {
 
     const statusState = this._statusState();
     const boilerOn = statusState ? !!statusState.attributes.boiler_on : false;
+    const masterOn = statusState ? statusState.attributes.master_on !== false : true;
+    const masterEntityId = statusState ? (statusState.attributes.master_switch_entity_id || null) : null;
     const reason = statusState ? (statusState.state || "") : "";
     const roomsInfo = this._roomsInfo();
 
     this._body.innerHTML =
-      this._renderBoilerStatus(boilerOn, reason) +
+      this._renderBoilerStatus(boilerOn, masterOn, masterEntityId, reason) +
+      (this._confirmMaster ? this._renderMasterConfirm() : "") +
+      `<div class="${masterOn ? "" : "pcs-master-off"}">` +
       schedules.map((room) => this._renderRoom(room, roomsInfo)).join("") +
+      `</div>` +
       `<div class="pcs-version">card v${CARD_VERSION}</div>`;
 
     this._body.querySelectorAll("[data-edit]").forEach((btn) => {
@@ -218,6 +224,38 @@ class PrecisionClimateScheduleCard extends HTMLElement {
       });
     });
 
+    const masterBtn = this._body.querySelector("[data-master-toggle]");
+    if (masterBtn) {
+      masterBtn.addEventListener("click", () => {
+        const entityId = masterBtn.getAttribute("data-master-toggle");
+        const want = masterBtn.getAttribute("data-master-want") === "1";
+        this._confirmMaster = { want, entityId };
+        this._render();
+      });
+    }
+
+    const confirmYes = this._body.querySelector("[data-master-confirm]");
+    if (confirmYes) {
+      confirmYes.addEventListener("click", async () => {
+        const { want, entityId } = this._confirmMaster;
+        this._confirmMaster = null;
+        try {
+          await this._hass.callService("switch", want ? "turn_on" : "turn_off", { entity_id: entityId });
+        } catch (err) {
+          this._error = (err && err.message) || "Could not toggle master switch.";
+        }
+        this._render();
+      });
+    }
+
+    const confirmNo = this._body.querySelector("[data-master-cancel]");
+    if (confirmNo) {
+      confirmNo.addEventListener("click", () => {
+        this._confirmMaster = null;
+        this._render();
+      });
+    }
+
     // Position needle immediately after render.
     this._updateTimeLine();
   }
@@ -234,12 +272,41 @@ class PrecisionClimateScheduleCard extends HTMLElement {
     }
   }
 
-  _renderBoilerStatus(boilerOn, reason) {
+  _renderBoilerStatus(boilerOn, masterOn, masterEntityId, reason) {
     const icon = boilerOn ? "🔥" : "⚪";
     const label = boilerOn ? "Boiler ON" : "Boiler OFF";
     const cls = boilerOn ? "pcs-boiler-on" : "pcs-boiler-off";
     const reasonHtml = reason ? ` <span class="pcs-reason">— ${reason}</span>` : "";
-    return `<div class="pcs-boiler ${cls}">${icon} <strong>${label}</strong>${reasonHtml}</div>`;
+
+    let masterBtn = "";
+    if (masterEntityId) {
+      if (masterOn) {
+        masterBtn = `<button class="pcs-btn pcs-master-btn pcs-master-on"
+          data-master-toggle="${masterEntityId}" data-master-want="0"
+          title="Turn heating system OFF">⏻ Master ON</button>`;
+      } else {
+        masterBtn = `<button class="pcs-btn pcs-master-btn pcs-master-off-btn"
+          data-master-toggle="${masterEntityId}" data-master-want="1"
+          title="Turn heating system ON">⏻ Master OFF</button>`;
+      }
+    }
+
+    return `<div class="pcs-boiler ${cls}${masterOn ? "" : " pcs-boiler-master-off"}">
+      <span>${icon} <strong>${label}</strong>${reasonHtml}</span>
+      ${masterBtn}
+    </div>`;
+  }
+
+  _renderMasterConfirm() {
+    const { want } = this._confirmMaster;
+    const action = want ? "turn the heating system ON" : "turn the heating system OFF";
+    const actionLabel = want ? "✓ Turn ON" : "✓ Turn OFF";
+    const warnClass = want ? "" : " pcs-confirm-warn";
+    return `<div class="pcs-confirm${warnClass}">
+      <span>Are you sure you want to ${action}?</span>
+      <button class="pcs-btn pcs-primary" data-master-confirm>${actionLabel}</button>
+      <button class="pcs-btn" data-master-cancel>Cancel</button>
+    </div>`;
   }
 
   _renderRoom(room, roomsInfo) {
@@ -400,10 +467,25 @@ const STYLE = `
   .pcs-body { padding: 8px 16px 16px; }
 
   /* Boiler status */
-  .pcs-boiler { padding: 8px 12px; border-radius: 8px; margin-bottom: 14px; font-size: 1.05em; }
+  .pcs-boiler { padding: 8px 12px; border-radius: 8px; margin-bottom: 8px; font-size: 1.05em; display: flex; align-items: center; justify-content: space-between; gap: 8px; }
   .pcs-boiler-on  { background: rgba(217,102,59,.18); border: 1px solid rgba(217,102,59,.5); }
   .pcs-boiler-off { background: var(--secondary-background-color, rgba(255,255,255,.05)); border: 1px solid var(--divider-color, #444); }
+  .pcs-boiler-master-off { opacity: .7; }
   .pcs-reason { opacity: .75; font-size: .88em; }
+
+  /* Master switch button */
+  .pcs-master-btn { white-space: nowrap; font-weight: 600; }
+  .pcs-master-on  { border-color: var(--success-color, #4caf50); color: var(--success-color, #4caf50); }
+  .pcs-master-off-btn { border-color: var(--error-color, #d9663b); color: var(--error-color, #d9663b); }
+
+  /* Master confirmation strip */
+  .pcs-confirm { display: flex; align-items: center; gap: 8px; padding: 8px 12px; border-radius: 8px; margin-bottom: 14px; background: var(--secondary-background-color, rgba(255,255,255,.05)); border: 1px solid var(--divider-color, #444); font-size: .9em; flex-wrap: wrap; }
+  .pcs-confirm-warn { background: rgba(217,102,59,.12); border-color: rgba(217,102,59,.5); }
+  .pcs-confirm span { flex: 1; min-width: 160px; }
+
+  /* When master is OFF, dim all room timelines */
+  .pcs-master-off .pcs-timeline { opacity: .35; }
+  .pcs-master-off .pcs-room-name { opacity: .6; }
 
   /* Room header */
   .pcs-room { margin-bottom: 18px; }

@@ -6,6 +6,7 @@ from homeassistant.components.sensor import SensorDeviceClass, SensorEntity
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import UnitOfTemperature
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers.entity import EntityCategory
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from .const import DOMAIN
@@ -16,10 +17,49 @@ async def async_setup_entry(
     hass: HomeAssistant, entry: ConfigEntry, async_add_entities: AddEntitiesCallback
 ) -> None:
     coordinator = hass.data[DOMAIN][entry.entry_id]
-    async_add_entities(
+    entities: list = [
         RoomTargetSensor(coordinator, entry.entry_id, room)
         for room in coordinator.config.rooms
-    )
+    ]
+    entities.append(SystemStatusSensor(coordinator, entry.entry_id))
+    async_add_entities(entities)
+
+
+class SystemStatusSensor(PrecisionBaseEntity, SensorEntity):
+    """Diagnostic: the latest boiler decision and what the loop actually saw."""
+
+    _attr_name = "Status"
+    _attr_icon = "mdi:state-machine"
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+
+    def __init__(self, coordinator, entry_id: str) -> None:
+        super().__init__(coordinator, entry_id)
+        self._attr_unique_id = f"{entry_id}_status"
+
+    @property
+    def native_value(self) -> str:
+        # e.g. "demand", "all_satisfied", "hold", "master_off", "active_window_open"
+        return self._coordinator.last_reason
+
+    @property
+    def extra_state_attributes(self) -> dict:
+        c = self._coordinator
+        rooms = {}
+        for room in c.config.rooms:
+            rid = room.room_id
+            rooms[room.name] = {
+                "temperature": c.observed_temps.get(rid),
+                "target": c.resolved_targets.get(rid),
+                "active": c.resolved_active.get(rid),
+                "trv_open": c.trv_open.get(rid),
+                "heating": c.room_heating.get(rid),
+            }
+        return {
+            "boiler_on": c.boiler_on,
+            "master_on": c.master_on,
+            "paused": c.paused,
+            "rooms": rooms,
+        }
 
 
 class RoomTargetSensor(PrecisionBaseEntity, SensorEntity):

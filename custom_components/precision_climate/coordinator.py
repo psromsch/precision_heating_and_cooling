@@ -95,6 +95,10 @@ class PrecisionClimateCoordinator:
         self.resolved_targets: dict[str, float] = {}
         self.resolved_active: dict[str, bool] = {}
 
+        # Latest diagnostics, exposed to the status sensor.
+        self.last_reason: str = "startup"
+        self.observed_temps: dict[str, float | None] = {}
+
         # Failsafe timers.
         self._prolonged = SustainedCondition(PROLONGED_HEATING_SECONDS)
         self._mismatch = {r.room_id: SustainedCondition(TRV_MISMATCH_SECONDS) for r in self.config.rooms}
@@ -270,6 +274,8 @@ class PrecisionClimateCoordinator:
         )
 
         decision = evaluate(rooms, system, self.mode)
+        self.last_reason = decision.reason
+        self.observed_temps = {r.room_id: r.temperature for r in rooms}
 
         await self._apply(decision, rooms, resolved_by_id)
         self._run_failsafes(mono, rooms, resolved_by_id)
@@ -401,3 +407,12 @@ class PrecisionClimateCoordinator:
     @property
     def room_heating(self) -> dict[str, bool]:
         return dict(self._room_heating)
+
+    @property
+    def boiler_on(self) -> bool:
+        """The boiler state the integration currently commands."""
+        return self._boiler_on
+
+    @property
+    def trv_open(self) -> dict[str, bool]:
+        return dict(self._trv_open)

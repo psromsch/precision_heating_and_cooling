@@ -123,6 +123,18 @@ async def _async_register_card(hass: HomeAssistant) -> None:
     try:
         from homeassistant.components.frontend import add_extra_js_url
 
-        add_extra_js_url(hass, CARD_URL)
+        add_extra_js_url(hass, f"{CARD_URL}?v={_manifest_version()}")
     except Exception:  # noqa: BLE001 - frontend not loaded; card can be added manually
         pass
+
+
+def _manifest_version() -> str:
+    """Return the integration version from manifest.json for cache-busting."""
+    import json
+
+    try:
+        path = os.path.join(os.path.dirname(__file__), "manifest.json")
+        with open(path, encoding="utf-8") as fh:
+            return str(json.load(fh).get("version", "0"))
+    except Exception:  # noqa: BLE001
+        return "0"

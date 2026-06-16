@@ -55,9 +55,15 @@ class SystemStatusSensor(PrecisionBaseEntity, SensorEntity):
                 "heating": c.room_heating.get(rid),
                 "paused": c.room_paused(rid),
             }
+        from homeassistant.helpers import entity_registry as er
+        registry = er.async_get(self.hass)
+        master_entity_id = registry.async_get_entity_id(
+            "switch", DOMAIN, f"{self._attr_unique_id.removesuffix('_status')}_master"
+        )
         return {
             "boiler_on": c.boiler_on,
             "master_on": c.master_on,
+            "master_switch_entity_id": master_entity_id,
             "paused": c.paused,
             "rooms": rooms,
             # Consumed by the visual schedule card to render/edit schedules.

@@ -11,10 +11,10 @@
 # -----------------------------------------------------------------------------
 # BEFORE USING: verify the NEW integration's entity_ids.
 # Go to Developer Tools > States and filter for "dummy_heating" / "dummy_target".
-# Update the three room rows below if the ids differ from the guesses:
-#     binary_sensor.master_dummy_heating
-#     binary_sensor.pieza_1_dummy_heating
-#     binary_sensor.living_dummy_heating
+# Update the room rows below if the ids differ from the guesses:
+#     binary_sensor.master_dummy_heating   sensor.master_dummy_target
+#     binary_sensor.pieza_1_dummy_heating  sensor.pieza_1_dummy_target
+#     binary_sensor.living_dummy_heating   sensor.living_dummy_target
 # The BOILER comparison uses exact ids and needs no editing.
 # =============================================================================
 
@@ -63,6 +63,39 @@ template:
           old: "{{ states('binary_sensor.comedor_heating') }}"
           new: "{{ states('binary_sensor.living_dummy_heating') }}"
 
+      # --- Per-room TARGET temperature (do both agree on the setpoint?) -----
+      # Tolerance 0.05 °C absorbs rounding. Compared regardless of heat state,
+      # so you catch "both want heat but at different targets" too.
+      - name: "Master Bedroom Target Mismatch"
+        unique_id: master_bedroom_target_mismatch
+        device_class: problem
+        state: >
+          {{ (state_attr('climate.trv_sonoff_master_bedroom_better_thermostat', 'temperature') | float(0)
+              - states('sensor.master_dummy_target') | float(0)) | abs > 0.05 }}
+        attributes:
+          old: "{{ state_attr('climate.trv_sonoff_master_bedroom_better_thermostat', 'temperature') }}"
+          new: "{{ states('sensor.master_dummy_target') }}"
+
+      - name: "Pieza 1 Target Mismatch"
+        unique_id: pieza_1_target_mismatch
+        device_class: problem
+        state: >
+          {{ (states('sensor.pieza_1_effective_target') | float(0)
+              - states('sensor.pieza_1_dummy_target') | float(0)) | abs > 0.05 }}
+        attributes:
+          old: "{{ states('sensor.pieza_1_effective_target') }}"
+          new: "{{ states('sensor.pieza_1_dummy_target') }}"
+
+      - name: "Living Target Mismatch"
+        unique_id: living_target_mismatch
+        device_class: problem
+        state: >
+          {{ (states('sensor.living_effective_target') | float(0)
+              - states('sensor.living_dummy_target') | float(0)) | abs > 0.05 }}
+        attributes:
+          old: "{{ states('sensor.living_effective_target') }}"
+          new: "{{ states('sensor.living_dummy_target') }}"
+
   - sensor:
       # --- One sensor to chart: how many decisions currently disagree ------
       # Open History on THIS sensor to see every divergence with timestamps.
@@ -73,14 +106,20 @@ template:
           {{ ['binary_sensor.heating_boiler_mismatch',
               'binary_sensor.master_bedroom_heating_mismatch',
               'binary_sensor.pieza_1_heating_mismatch',
-              'binary_sensor.living_heating_mismatch']
+              'binary_sensor.living_heating_mismatch',
+              'binary_sensor.master_bedroom_target_mismatch',
+              'binary_sensor.pieza_1_target_mismatch',
+              'binary_sensor.living_target_mismatch']
              | select('is_state', 'on') | list | count }}
         attributes:
           mismatched: >
             {{ ['boiler' if is_state('binary_sensor.heating_boiler_mismatch','on') else '',
-                'master' if is_state('binary_sensor.master_bedroom_heating_mismatch','on') else '',
-                'pieza_1' if is_state('binary_sensor.pieza_1_heating_mismatch','on') else '',
-                'living' if is_state('binary_sensor.living_heating_mismatch','on') else '']
+                'master/heat' if is_state('binary_sensor.master_bedroom_heating_mismatch','on') else '',
+                'pieza_1/heat' if is_state('binary_sensor.pieza_1_heating_mismatch','on') else '',
+                'living/heat' if is_state('binary_sensor.living_heating_mismatch','on') else '',
+                'master/target' if is_state('binary_sensor.master_bedroom_target_mismatch','on') else '',
+                'pieza_1/target' if is_state('binary_sensor.pieza_1_target_mismatch','on') else '',
+                'living/target' if is_state('binary_sensor.living_target_mismatch','on') else '']
                | reject('eq','') | list | join(', ') }}
           boiler_old: "{{ states('switch.wifi_smart_switch_2') }}"
           boiler_new: "{{ states('switch.wifi_smart_switch_2_dummy') }}"

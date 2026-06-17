@@ -30,7 +30,7 @@ const DAY_ORDER = ["all", "weekday", "weekend", "mon", "tue", "wed", "thu", "fri
 
 // Shown in the card footer so you can confirm which card version is live
 // after a HACS update (keep in sync with manifest.json).
-const CARD_VERSION = "0.2.8";
+const CARD_VERSION = "0.2.9";
 
 const pad = (n) => String(n).padStart(2, "0");
 const minToHHMM = (m) => {

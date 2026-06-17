@@ -25,6 +25,7 @@ from ..const import (
     CONF_ROOMS,
     CONF_SCHEDULE_BLOCKS,
     CONF_SCHEDULE_MODE,
+    CONF_SETTINGS,
     CONF_SUNNY_DAY,
     CONF_SUNNY_ENABLED,
     CONF_SUNNY_END_MIN,
@@ -76,9 +77,19 @@ class RuntimeConfig:
     sunny_day: SunnyDayConfig
     notify_services: list[str] = field(default_factory=list)
     notifications: dict[str, bool] = field(default_factory=dict)
+    # Global settings managed from the card's config panel (boost, away, ...).
+    settings: dict = field(default_factory=dict)
 
     def room_by_id(self, room_id: str) -> RoomConfig | None:
         return next((r for r in self.rooms if r.room_id == room_id), None)
+
+    @property
+    def boost_duration_hours(self) -> float:
+        from ..const import CONF_BOOST_DURATION_HOURS, DEFAULT_BOOST_DURATION_HOURS
+
+        return float(
+            self.settings.get(CONF_BOOST_DURATION_HOURS, DEFAULT_BOOST_DURATION_HOURS)
+        )
 
 
 def _parse_blocks(raw_blocks: dict) -> dict[str, list[ScheduleBlock]]:
@@ -146,4 +157,5 @@ def build_runtime(data: dict) -> RuntimeConfig:
         sunny_day=sunny,
         notify_services=notify_services,
         notifications=dict(data.get(CONF_NOTIFICATIONS, {})),
+        settings=dict(data.get(CONF_SETTINGS, {})),
     )

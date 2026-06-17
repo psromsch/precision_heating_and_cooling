@@ -54,3 +54,20 @@ set_room_pause:
       example: true
       selector:
         boolean:
+
+set_settings:
+  name: Update global settings
+  description: >
+    Shallow-merge a partial global settings dict into the integration's stored
+    settings (boost duration, away mode, etc.). Only the keys you send are
+    changed; everything else is preserved. Used by the schedule card's
+    configuration panel.
+  fields:
+    settings:
+      name: Settings
+      description: >
+        Partial settings mapping, e.g. {"boost_duration_hours": 2}.
+      required: true
+      example: '{"boost_duration_hours": 2}'
+      selector:
+        object:

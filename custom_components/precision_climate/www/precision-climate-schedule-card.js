@@ -30,7 +30,7 @@ const DAY_ORDER = ["all", "weekday", "weekend", "mon", "tue", "wed", "thu", "fri
 
 // Shown in the card footer so you can confirm which card version is live
 // after a HACS update (keep in sync with manifest.json).
-const CARD_VERSION = "0.2.9";
+const CARD_VERSION = "0.3.0";
 
 const pad = (n) => String(n).padStart(2, "0");
 const minToHHMM = (m) => {
@@ -56,6 +56,9 @@ class PrecisionClimateScheduleCard extends HTMLElement {
     this._edit = null; // { room_id, day_key, blocks: [...] }
     this._error = null;
     this._confirmMaster = null; // { want: bool, entityId: string } while confirmation is pending
+    this._settingsOpen = false; // global config panel open?
+    this._settingsTab = "boost"; // active tab in the config panel
+    this._settingsDraft = null; // working copy of settings while the panel is open
   }
 
   connectedCallback() {
@@ -69,10 +72,10 @@ class PrecisionClimateScheduleCard extends HTMLElement {
 
   set hass(hass) {
     this._hass = hass;
-    // While the editor is open, live state updates from HA must not trigger a
-    // re-render: doing so rebuilds the inputs, dropping focus and discarding
-    // any in-progress edits. The editor is rendered explicitly on open.
-    if (this._edit) return;
+    // While the editor or the config panel is open, live state updates from HA
+    // must not trigger a re-render: doing so rebuilds the inputs, dropping focus
+    // and discarding any in-progress edits. These views are rendered explicitly.
+    if (this._edit || this._settingsOpen) return;
     this._render();
   }
 
@@ -105,6 +108,11 @@ class PrecisionClimateScheduleCard extends HTMLElement {
   _roomsInfo() {
     const s = this._statusState();
     return s ? (s.attributes.rooms || {}) : {};
+  }
+
+  _settings() {
+    const s = this._statusState();
+    return s ? (s.attributes.settings || {}) : {};
   }
 
   _startEdit(room, dayKey) {
@@ -194,6 +202,12 @@ class PrecisionClimateScheduleCard extends HTMLElement {
       return;
     }
 
+    if (this._settingsOpen) {
+      this._body.innerHTML = this._renderSettings();
+      this._wireSettings();
+      return;
+    }
+
     const statusState = this._statusState();
     const boilerOn = statusState ? !!statusState.attributes.boiler_on : false;
     const masterOn = statusState ? statusState.attributes.master_on !== false : true;
@@ -256,8 +270,51 @@ class PrecisionClimateScheduleCard extends HTMLElement {
       });
     }
 
+    const gear = this._body.querySelector("[data-open-settings]");
+    if (gear) {
+      gear.addEventListener("click", () => this._openSettings());
+    }
+
     // Position needle immediately after render.
     this._updateTimeLine();
+  }
+
+  _openSettings() {
+    // Take a working copy so edits aren't lost to live HA state updates and can
+    // be cancelled. Only the keys the panel manages are seeded here.
+    const s = this._settings();
+    this._settingsDraft = {
+      boost_duration_hours: Number(s.boost_duration_hours ?? 1),
+    };
+    this._settingsTab = "boost";
+    this._settingsOpen = true;
+    this._error = null;
+    this._render();
+  }
+
+  _closeSettings() {
+    this._settingsOpen = false;
+    this._settingsDraft = null;
+    this._render();
+  }
+
+  async _saveSettings() {
+    // Persist the draft. The service shallow-merges, so we only send managed keys.
+    const draft = this._settingsDraft || {};
+    const patch = {
+      boost_duration_hours: Number(draft.boost_duration_hours) || 1,
+    };
+    try {
+      await this._hass.callService("precision_climate", "set_settings", {
+        settings: patch,
+      });
+      this._settingsOpen = false;
+      this._settingsDraft = null;
+      this._error = null;
+    } catch (err) {
+      this._error = (err && err.message) || "Could not save settings.";
+    }
+    this._render();
   }
 
   async _setPause(roomId, paused) {
@@ -291,9 +348,11 @@ class PrecisionClimateScheduleCard extends HTMLElement {
       }
     }
 
+    const gearBtn = `<button class="pcs-btn pcs-gear-btn" data-open-settings title="Global configuration">⚙</button>`;
+
     return `<div class="pcs-boiler ${cls}${masterOn ? "" : " pcs-boiler-master-off"}">
       <span>${icon} <strong>${label}</strong>${reasonHtml}</span>
-      ${masterBtn}
+      <span class="pcs-boiler-actions">${masterBtn}${gearBtn}</span>
     </div>`;
   }
 
@@ -307,6 +366,80 @@ class PrecisionClimateScheduleCard extends HTMLElement {
       <button class="pcs-btn pcs-primary" data-master-confirm>${actionLabel}</button>
       <button class="pcs-btn" data-master-cancel>Cancel</button>
     </div>`;
+  }
+
+  // --- Global configuration panel -----------------------------------------
+
+  _renderSettings() {
+    const tabs = [
+      { id: "boost", label: "Boost" },
+      { id: "away", label: "Away Mode" },
+      { id: "presence", label: "Presence" },
+      { id: "sunny", label: "Sunny Day" },
+    ];
+    const tabBar = tabs
+      .map(
+        (t) =>
+          `<button class="pcs-tab ${t.id === this._settingsTab ? "pcs-tab-active" : ""}" data-tab="${t.id}">${t.label}</button>`
+      )
+      .join("");
+
+    return `
+      <div class="pcs-settings">
+        <div class="pcs-settings-head">
+          <span class="pcs-room-name">⚙ Global configuration</span>
+        </div>
+        ${this._error ? `<div class="pcs-error">${this._error}</div>` : ""}
+        <div class="pcs-tabbar">${tabBar}</div>
+        <div class="pcs-tab-body">${this._renderSettingsTab()}</div>
+        <div class="pcs-actions">
+          <span style="flex:1"></span>
+          <button class="pcs-btn pcs-settings-cancel">Cancel</button>
+          <button class="pcs-btn pcs-primary pcs-settings-save">Save</button>
+        </div>
+      </div>`;
+  }
+
+  _renderSettingsTab() {
+    const d = this._settingsDraft || {};
+    if (this._settingsTab === "boost") {
+      return `
+        <div class="pcs-field">
+          <label>Boost duration (hours)</label>
+          <input class="pcs-in pcs-boost-hours" type="number" min="0.5" max="12" step="0.5"
+            value="${Number(d.boost_duration_hours ?? 1)}">
+        </div>
+        <div class="pcs-hint">
+          When you change a TRV's target by hand, that room will be boosted to
+          the temperature you set (and made active) for this many hours, then
+          return to its schedule. Re-touching the TRV restarts the timer.
+        </div>`;
+    }
+    return `<div class="pcs-coming-soon">This section is coming soon.</div>`;
+  }
+
+  _syncSettingsFromDom() {
+    const hours = this._body.querySelector(".pcs-boost-hours");
+    if (hours) {
+      this._settingsDraft.boost_duration_hours = parseFloat(hours.value);
+    }
+  }
+
+  _wireSettings() {
+    this._body.querySelectorAll("[data-tab]").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        this._syncSettingsFromDom();
+        this._settingsTab = btn.getAttribute("data-tab");
+        this._render();
+      });
+    });
+    this._body
+      .querySelector(".pcs-settings-cancel")
+      .addEventListener("click", () => this._closeSettings());
+    this._body.querySelector(".pcs-settings-save").addEventListener("click", () => {
+      this._syncSettingsFromDom();
+      this._saveSettings();
+    });
   }
 
   _renderRoom(room, roomsInfo) {
@@ -486,6 +619,21 @@ const STYLE = `
   /* When master is OFF, dim all room timelines */
   .pcs-master-off .pcs-timeline { opacity: .35; }
   .pcs-master-off .pcs-room-name { opacity: .6; }
+
+  /* Header actions (master + gear) */
+  .pcs-boiler-actions { display: flex; align-items: center; gap: 6px; }
+  .pcs-gear-btn { font-size: 1em; line-height: 1; padding: 3px 8px; }
+
+  /* Global config panel */
+  .pcs-settings-head { margin-bottom: 8px; }
+  .pcs-tabbar { display: flex; gap: 4px; border-bottom: 1px solid var(--divider-color, #444); margin-bottom: 12px; flex-wrap: wrap; }
+  .pcs-tab { background: none; border: none; border-bottom: 2px solid transparent; color: var(--primary-text-color, #fff); opacity: .65; padding: 6px 10px; cursor: pointer; font-size: .9em; }
+  .pcs-tab:hover { opacity: 1; }
+  .pcs-tab-active { opacity: 1; border-bottom-color: var(--primary-color, #3b78d9); font-weight: 600; }
+  .pcs-tab-body { min-height: 80px; }
+  .pcs-field { display: flex; flex-direction: column; gap: 4px; margin-bottom: 8px; max-width: 220px; }
+  .pcs-field label { font-size: .85em; opacity: .8; }
+  .pcs-coming-soon { opacity: .55; font-style: italic; padding: 16px 0; }
 
   /* Room header */
   .pcs-room { margin-bottom: 18px; }

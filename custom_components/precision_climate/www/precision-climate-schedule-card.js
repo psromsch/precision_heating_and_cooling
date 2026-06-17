@@ -30,7 +30,7 @@ const DAY_ORDER = ["all", "weekday", "weekend", "mon", "tue", "wed", "thu", "fri
 
 // Shown in the card footer so you can confirm which card version is live
 // after a HACS update (keep in sync with manifest.json).
-const CARD_VERSION = "0.3.0";
+const CARD_VERSION = "0.3.1";
 
 const pad = (n) => String(n).padStart(2, "0");
 const minToHHMM = (m) => {
@@ -238,6 +238,12 @@ class PrecisionClimateScheduleCard extends HTMLElement {
       });
     });
 
+    this._body.querySelectorAll("[data-cancel-boost]").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        this._cancelBoost(btn.getAttribute("data-cancel-boost"));
+      });
+    });
+
     const masterBtn = this._body.querySelector("[data-master-toggle]");
     if (masterBtn) {
       masterBtn.addEventListener("click", () => {
@@ -325,6 +331,18 @@ class PrecisionClimateScheduleCard extends HTMLElement {
       });
     } catch (err) {
       this._error = (err && err.message) || "Could not change pause state.";
+      this._render();
+    }
+  }
+
+  async _cancelBoost(roomId) {
+    try {
+      await this._hass.callService("precision_climate", "set_room_boost", {
+        room_id: roomId,
+        cancel: true,
+      });
+    } catch (err) {
+      this._error = (err && err.message) || "Could not cancel boost.";
       this._render();
     }
   }
@@ -454,6 +472,27 @@ class PrecisionClimateScheduleCard extends HTMLElement {
     const pausedBadge = paused ? `<span class="pcs-paused-badge">paused</span>` : "";
     const pauseBtn = `<button class="pcs-btn pcs-pause-btn ${paused ? "pcs-resume" : ""}" data-pause="${room.room_id}|${paused ? "0" : "1"}" title="${paused ? "Resume room" : "Pause room (target 5°C until resumed)"}">${paused ? "▶ Resume" : "⏸ Pause"}</button>`;
 
+    // Boost: manual TRV override active for a window. Show a badge + cancel
+    // button, and overlay a band on each timeline from now until it expires.
+    const boosted = !!info.boosted;
+    const boostExpires = info.boost_expires ? Date.parse(info.boost_expires) : null;
+    const boostBadge = boosted
+      ? `<span class="pcs-boost-badge" title="Boost active until ${boostExpires ? new Date(boostExpires).toLocaleTimeString() : ""}">⚡ boost ${info.boost_target != null ? Number(info.boost_target).toFixed(1) + "°" : ""}</span>`
+      : "";
+    const boostBtn = boosted
+      ? `<button class="pcs-btn pcs-cancelboost-btn" data-cancel-boost="${room.room_id}" title="Cancel boost and return to schedule">✕ Cancel boost</button>`
+      : "";
+
+    let boostBandHtml = "";
+    if (boosted && boostExpires) {
+      const nowM = nowMinutes();
+      const remMin = Math.max(0, (boostExpires - Date.now()) / 60000);
+      const endM = Math.min(1440, nowM + remMin);
+      const left = (nowM / 1440) * 100;
+      const width = ((endM - nowM) / 1440) * 100;
+      boostBandHtml = `<div class="pcs-boost-band" style="left:${left.toFixed(3)}%;width:${width.toFixed(3)}%" title="Boosted to ${info.boost_target}°"></div>`;
+    }
+
     const dayKeys = Object.keys(room.blocks).sort(
       (a, b) => DAY_ORDER.indexOf(a) - DAY_ORDER.indexOf(b)
     );
@@ -479,6 +518,7 @@ class PrecisionClimateScheduleCard extends HTMLElement {
             </div>
             <div class="pcs-timeline-wrap">
               <div class="pcs-timeline">${segs}</div>
+              ${boostBandHtml}
               <div class="pcs-needle"></div>
             </div>
             <div class="pcs-axis">
@@ -489,10 +529,10 @@ class PrecisionClimateScheduleCard extends HTMLElement {
       })
       .join("");
 
-    return `<div class="pcs-room${paused ? " pcs-room-paused" : ""}">
+    return `<div class="pcs-room${paused ? " pcs-room-paused" : ""}${boosted ? " pcs-room-boosted" : ""}">
       <div class="pcs-room-name">
-        <span class="pcs-room-name-text">${room.name}${heatIcon}${tempSpan}${pausedBadge}</span>
-        ${pauseBtn}
+        <span class="pcs-room-name-text">${room.name}${heatIcon}${tempSpan}${pausedBadge}${boostBadge}</span>
+        <span class="pcs-room-actions">${boostBtn}${pauseBtn}</span>
       </div>
       ${days}
     </div>`;
@@ -645,6 +685,17 @@ const STYLE = `
   .pcs-pause-btn { white-space: nowrap; }
   .pcs-pause-btn.pcs-resume { border-color: var(--warning-color, #d9a13b); color: var(--warning-color, #d9a13b); }
   .pcs-room-paused .pcs-timeline { opacity: .5; }
+  .pcs-room-actions { display: flex; align-items: center; gap: 6px; }
+
+  /* Boost */
+  .pcs-boost-badge { font-weight: 600; font-size: .72em; text-transform: uppercase; letter-spacing: .03em; padding: 1px 6px; border-radius: 8px; background: #8b5cf6; color: #fff; white-space: nowrap; }
+  .pcs-cancelboost-btn { white-space: nowrap; border-color: #8b5cf6; color: #c4b5fd; }
+  .pcs-boost-band {
+    position: absolute; top: 0; bottom: 0;
+    background: repeating-linear-gradient(45deg, rgba(139,92,246,.55), rgba(139,92,246,.55) 6px, rgba(139,92,246,.30) 6px, rgba(139,92,246,.30) 12px);
+    border-left: 2px solid #8b5cf6; border-right: 2px solid #8b5cf6;
+    pointer-events: none;
+  }
 
   /* Day row */
   .pcs-day-head { display: flex; align-items: center; justify-content: space-between; font-size: .95em; opacity: .85; margin-top: 6px; }

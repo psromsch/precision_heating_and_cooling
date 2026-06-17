@@ -30,7 +30,7 @@ const DAY_ORDER = ["all", "weekday", "weekend", "mon", "tue", "wed", "thu", "fri
 
 // Shown in the card footer so you can confirm which card version is live
 // after a HACS update (keep in sync with manifest.json).
-const CARD_VERSION = "0.6.0";
+const CARD_VERSION = "0.7.0";
 
 const pad = (n) => String(n).padStart(2, "0");
 const minToHHMM = (m) => {
@@ -534,21 +534,53 @@ class PrecisionClimateScheduleCard extends HTMLElement {
       const on = !!d.presence_enabled;
       const toggle = `<button class="pcs-btn pcs-presence-toggle ${on ? "pcs-primary" : ""}" data-presence-toggle>
         ${on ? "✅ Presence mode: ON" : "Presence mode: OFF"}</button>`;
+
+      // Build zone dropdown from all zone.* entities in hass.states.
+      const zoneIds = Object.keys(this._hass.states)
+        .filter((id) => id.startsWith("zone."))
+        .sort();
+      const zoneOptions = zoneIds
+        .map((id) => {
+          const name = (this._hass.states[id].attributes.friendly_name || id);
+          const sel = id === (d.presence_zone || "") ? " selected" : "";
+          return `<option value="${id}"${sel}>${name} (${id})</option>`;
+        })
+        .join("");
+      const zoneNone = !d.presence_zone ? " selected" : "";
+      const zoneSelect = `<select class="pcs-in pcs-presence-zone-select">
+        <option value=""${zoneNone}>— select a zone —</option>
+        ${zoneOptions}
+      </select>`;
+
+      // Build person multi-select from all person.* entities.
+      const personIds = Object.keys(this._hass.states)
+        .filter((id) => id.startsWith("person."))
+        .sort();
+      const selectedPersons = new Set(d.presence_persons || []);
+      const personOptions = personIds
+        .map((id) => {
+          const name = (this._hass.states[id].attributes.friendly_name || id);
+          const sel = selectedPersons.has(id) ? " selected" : "";
+          return `<option value="${id}"${sel}>${name} (${id})</option>`;
+        })
+        .join("");
+      const personSelect = `<select class="pcs-in pcs-presence-persons-select" multiple size="${Math.min(Math.max(personIds.length, 2), 5)}">
+        ${personOptions}
+      </select>`;
+
       return `
         <div class="pcs-away-toggle-row">${toggle}</div>
         <div class="pcs-hint">
           When Presence mode is enabled, the system automatically switches to Away mode
           when nobody is home (in the configured zone) for longer than the grace period.
         </div>
-        <div class="pcs-field">
-          <label>Zone entity (e.g. zone.home)</label>
-          <input class="pcs-in pcs-presence-zone" type="text" placeholder="zone.home"
-            value="${d.presence_zone || ""}">
+        <div class="pcs-field pcs-presence-field-wide">
+          <label>Home zone</label>
+          ${zoneSelect}
         </div>
-        <div class="pcs-field">
-          <label>Person entities (comma-separated)</label>
-          <input class="pcs-in pcs-presence-persons" type="text" placeholder="person.alice, person.bob"
-            value="${(d.presence_persons || []).join(", ")}">
+        <div class="pcs-field pcs-presence-field-wide">
+          <label>Tracked persons (hold Ctrl/⌘ to select multiple)</label>
+          ${personSelect}
         </div>
         <div class="pcs-field">
           <label>Grace period (minutes)</label>
@@ -567,16 +599,13 @@ class PrecisionClimateScheduleCard extends HTMLElement {
     this._body.querySelectorAll(".pcs-away-target").forEach((inp) => {
       this._settingsDraft.away_targets[inp.getAttribute("data-room")] = parseFloat(inp.value);
     });
-    const presenceZone = this._body.querySelector(".pcs-presence-zone");
+    const presenceZone = this._body.querySelector(".pcs-presence-zone-select");
     if (presenceZone) {
-      this._settingsDraft.presence_zone = presenceZone.value.trim();
+      this._settingsDraft.presence_zone = presenceZone.value;
     }
-    const presencePersons = this._body.querySelector(".pcs-presence-persons");
+    const presencePersons = this._body.querySelector(".pcs-presence-persons-select");
     if (presencePersons) {
-      this._settingsDraft.presence_persons = presencePersons.value
-        .split(",")
-        .map((s) => s.trim())
-        .filter(Boolean);
+      this._settingsDraft.presence_persons = Array.from(presencePersons.selectedOptions).map((o) => o.value);
     }
     const presenceGrace = this._body.querySelector(".pcs-presence-grace");
     if (presenceGrace) {
@@ -870,6 +899,8 @@ const STYLE = `
 
   /* Presence mode */
   .pcs-presence-toggle { font-weight: 600; }
+  .pcs-presence-field-wide { max-width: 360px; }
+  .pcs-presence-persons-select { min-height: 70px; }
 
   /* Child lock */
   .pcs-childlock-field { flex-direction: row; align-items: center; justify-content: space-between; max-width: 300px; gap: 12px; }

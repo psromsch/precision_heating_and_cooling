@@ -23,7 +23,7 @@
  * No build step, no external dependencies.
  */
 
-const HISTORY_CARD_VERSION = "0.6.0";
+const HISTORY_CARD_VERSION = "0.7.0";
 
 // Per-room line colours, assigned round-robin in discovery order.
 const ROOM_COLORS = [
@@ -112,9 +112,22 @@ class PrecisionClimateHistoryCard extends HTMLElement {
       });
       const parsed = {};
       for (const eid of Object.keys(result || {})) {
+        // With minimal_response the first row of each entity is a full object,
+        // but later rows whose *value* didn't change are returned without a
+        // state key (just a timestamp). Carry the last known state forward so a
+        // long flat plateau doesn't truncate the line at the last value change.
+        let last;
         parsed[eid] = (result[eid] || [])
-          .map((p) => ({ t: (p.lu ? p.lu * 1000 : Date.parse(p.last_updated)), v: p.s !== undefined ? p.s : p.state }))
-          .filter((p) => !Number.isNaN(p.t));
+          .map((p) => {
+            // Timestamps: compressed `lu`/`lc` (epoch seconds) or full keys.
+            const tsSec = p.lu != null ? p.lu : p.lc;
+            const t = tsSec != null ? tsSec * 1000 : Date.parse(p.last_updated || p.last_changed);
+            let v = p.s !== undefined ? p.s : p.state;
+            if (v === undefined) v = last; // unchanged-value heartbeat row
+            else last = v;
+            return { t, v };
+          })
+          .filter((p) => !Number.isNaN(p.t) && p.v !== undefined);
       }
       this._history = parsed;
       this._error = null;

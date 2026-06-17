@@ -93,6 +93,21 @@ def test_room_by_id_lookup():
     assert rt.room_by_id("ghost") is None
 
 
+def test_settings_parsed_and_boost_duration_default():
+    rt = build_runtime(sample_data())
+    # No settings key -> empty dict and the default boost duration.
+    assert rt.settings == {}
+    assert rt.boost_duration_hours == 1.0
+
+
+def test_settings_boost_duration_override():
+    data = sample_data()
+    data["settings"] = {"boost_duration_hours": 2.5}
+    rt = build_runtime(data)
+    assert rt.settings["boost_duration_hours"] == 2.5
+    assert rt.boost_duration_hours == 2.5
+
+
 def test_defaults_applied_when_optional_fields_missing():
     data = {
         "boiler_switch": "switch.b",

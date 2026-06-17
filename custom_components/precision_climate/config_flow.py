@@ -36,6 +36,7 @@ from .const import (
     CONF_ROOMS,
     CONF_SCHEDULE_BLOCKS,
     CONF_SCHEDULE_MODE,
+    CONF_SETTINGS,
     CONF_SUNNY_DAY,
     CONF_SUNNY_ENABLED,
     CONF_SUNNY_END_MIN,
@@ -220,6 +221,10 @@ class PrecisionClimateOptionsFlow(config_entries.OptionsFlow):
         self._notify_services = list(merged.get(CONF_NOTIFY_SERVICES, []))
         self._notifications = dict(merged.get(CONF_NOTIFICATIONS, {}))
         self._sunny = dict(merged.get(CONF_SUNNY_DAY, {}))
+        # Global settings (boost/away/...) are managed from the card's config
+        # panel via the set_settings service. Preserve them so editing a room
+        # here doesn't wipe them.
+        self._settings = dict(merged.get(CONF_SETTINGS, {}))
         # Transient state while adding/editing a room.
         self._editing_id: str | None = None
         self._current_room: dict | None = None
@@ -243,6 +248,7 @@ class PrecisionClimateOptionsFlow(config_entries.OptionsFlow):
             CONF_NOTIFY_SERVICES: self._notify_services,
             CONF_NOTIFICATIONS: self._notifications,
             CONF_SUNNY_DAY: self._sunny,
+            CONF_SETTINGS: self._settings,
         }
         return self.async_create_entry(title="", data=options)
 

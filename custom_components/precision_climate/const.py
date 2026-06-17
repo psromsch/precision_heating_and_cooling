@@ -54,6 +54,13 @@ CONF_NOTIFY_SERVICE = "notify_service"
 CONF_NOTIFY_SERVICES = "notify_services"
 CONF_NOTIFICATIONS = "notifications"
 CONF_SUNNY_DAY = "sunny_day"
+CONF_SETTINGS = "settings"  # global settings managed from the card's config panel
+
+# Global settings keys (inside the CONF_SETTINGS dict)
+CONF_BOOST_DURATION_HOURS = "boost_duration_hours"
+
+# Defaults for global settings
+DEFAULT_BOOST_DURATION_HOURS = 1.0
 
 # Per-room
 CONF_ROOM_ID = "room_id"

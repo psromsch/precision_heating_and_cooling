@@ -5,7 +5,7 @@ from __future__ import annotations
 import os
 from typing import TYPE_CHECKING
 
-from .const import CONF_ROOMS, DOMAIN
+from .const import CONF_ROOMS, CONF_SETTINGS, DOMAIN
 
 if TYPE_CHECKING:
     from homeassistant.config_entries import ConfigEntry
@@ -17,6 +17,7 @@ PLATFORMS: list[str] = ["switch", "binary_sensor", "sensor"]
 
 SERVICE_SET_SCHEDULE = "set_schedule"
 SERVICE_SET_ROOM_PAUSE = "set_room_pause"
+SERVICE_SET_SETTINGS = "set_settings"
 # Frontend modules served and auto-loaded by the integration.
 CARD_FILENAMES = [
     "precision-climate-schedule-card.js",
@@ -150,6 +151,31 @@ def _async_register_services(hass: HomeAssistant) -> None:
 
     hass.services.async_register(
         DOMAIN, SERVICE_SET_ROOM_PAUSE, _handle_set_room_pause, schema=pause_schema
+    )
+
+    settings_schema = vol.Schema(
+        {vol.Required("settings"): dict},
+        extra=vol.ALLOW_EXTRA,
+    )
+
+    async def _handle_set_settings(call: "ServiceCall") -> None:
+        """Merge a partial settings dict into every entry's stored settings.
+
+        The card sends only the keys it changed; we shallow-merge so unrelated
+        settings (set elsewhere) are preserved. Triggers a reload via the
+        update listener so the new values take effect.
+        """
+        patch = call.data["settings"]
+        if not isinstance(patch, dict):
+            raise vol.Invalid("settings must be a mapping")
+        for entry in hass.config_entries.async_entries(DOMAIN):
+            current = dict(entry.options.get(CONF_SETTINGS, {}))
+            current.update(patch)
+            new_options = {**entry.options, CONF_SETTINGS: current}
+            hass.config_entries.async_update_entry(entry, options=new_options)
+
+    hass.services.async_register(
+        DOMAIN, SERVICE_SET_SETTINGS, _handle_set_settings, schema=settings_schema
     )
 
 

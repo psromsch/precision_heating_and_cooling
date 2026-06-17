@@ -77,6 +77,8 @@ class SystemStatusSensor(PrecisionBaseEntity, SensorEntity):
             "boiler_switch_entity_id": c.config.boiler_switch,
             "paused": c.paused,
             "rooms": rooms,
+            # Global settings managed from the card's config panel.
+            "settings": dict(c.config.settings),
             # Consumed by the visual schedule card to render/edit schedules.
             "schedules": c.schedule_payload(),
         }

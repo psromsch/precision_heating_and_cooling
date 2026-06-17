@@ -33,7 +33,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     # Home Assistant installed (e.g. in the unit-test sandbox).
     from .coordinator import PrecisionClimateCoordinator
 
-    coordinator = PrecisionClimateCoordinator(hass, {**entry.data, **entry.options})
+    coordinator = PrecisionClimateCoordinator(
+        hass, {**entry.data, **entry.options}, entry.entry_id
+    )
     await coordinator.async_setup()
 
     hass.data.setdefault(DOMAIN, {})[entry.entry_id] = coordinator
@@ -57,7 +59,14 @@ def _async_cleanup_orphan_entities(hass, entry, coordinator) -> None:
     from homeassistant.helpers import entity_registry as er
 
     entry_id = entry.entry_id
-    valid = {f"{entry_id}_master", f"{entry_id}_away", f"{entry_id}_status"}
+    valid = {
+        f"{entry_id}_master",
+        f"{entry_id}_away",
+        f"{entry_id}_status",
+        f"{entry_id}_boiler_runtime_today",
+        f"{entry_id}_boiler_runtime_week",
+        f"{entry_id}_boiler_runtime_month",
+    }
     for room in coordinator.config.rooms:
         valid.add(f"{entry_id}_{room.room_id}_target")
         valid.add(f"{entry_id}_{room.room_id}_heating")

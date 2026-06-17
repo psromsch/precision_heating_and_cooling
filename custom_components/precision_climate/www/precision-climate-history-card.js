@@ -23,7 +23,7 @@
  * No build step, no external dependencies.
  */
 
-const HISTORY_CARD_VERSION = "0.7.0";
+const HISTORY_CARD_VERSION = "0.8.0";
 
 // Per-room line colours, assigned round-robin in discovery order.
 const ROOM_COLORS = [

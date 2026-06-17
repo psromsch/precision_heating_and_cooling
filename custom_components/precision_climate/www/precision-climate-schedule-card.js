@@ -30,7 +30,7 @@ const DAY_ORDER = ["all", "weekday", "weekend", "mon", "tue", "wed", "thu", "fri
 
 // Shown in the card footer so you can confirm which card version is live
 // after a HACS update (keep in sync with manifest.json).
-const CARD_VERSION = "0.7.0";
+const CARD_VERSION = "0.8.0";
 
 const pad = (n) => String(n).padStart(2, "0");
 const minToHHMM = (m) => {
@@ -299,6 +299,7 @@ class PrecisionClimateScheduleCard extends HTMLElement {
     const presencePersons = statusState ? (statusState.attributes.presence_persons || []) : [];
     const presenceZone = statusState ? (statusState.attributes.presence_zone || "") : "";
     const presenceGrace = statusState ? (statusState.attributes.presence_grace_minutes ?? 10) : 10;
+    const holiday = (statusState && statusState.attributes.holiday_window) || {};
     this._settingsDraft = {
       boost_duration_hours: Number(s.boost_duration_hours ?? 1),
       away_on: status ? status.attributes.away_on === true : false,
@@ -313,6 +314,9 @@ class PrecisionClimateScheduleCard extends HTMLElement {
       presence_persons: presencePersons,
       presence_zone: presenceZone,
       presence_grace: presenceGrace,
+      // Holiday away window (absolute datetimes, local "YYYY-MM-DDTHH:MM").
+      away_holiday_start: holiday.start || "",
+      away_holiday_end: holiday.end || "",
     };
     schedules.forEach((r) => {
       this._settingsDraft.away_targets[r.room_id] = Number(awayTargets[r.room_id] ?? 16);
@@ -354,6 +358,8 @@ class PrecisionClimateScheduleCard extends HTMLElement {
       presence_zone: draft.presence_zone || "",
       presence_persons: draft.presence_persons || [],
       presence_grace_minutes: Number(draft.presence_grace) || 10,
+      away_holiday_start: draft.away_holiday_start || "",
+      away_holiday_end: draft.away_holiday_end || "",
     };
     try {
       await this._hass.callService("precision_climate", "set_settings", {
@@ -501,7 +507,26 @@ class PrecisionClimateScheduleCard extends HTMLElement {
           wins). Active/passive periods stay exactly as scheduled. The toggle
           takes effect immediately; the per-room targets are saved with Save.
         </div>
-        ${rows}`;
+        ${rows}
+        <div class="pcs-holiday">
+          <div class="pcs-holiday-title">🏖️ Holiday away (optional)</div>
+          <div class="pcs-hint">
+            Away mode turns on automatically at the start datetime and off at the
+            end datetime. It fires once at each — restart-safe, no countdown.
+            Leave both blank to disable.
+          </div>
+          <div class="pcs-field">
+            <label>Start</label>
+            <input class="pcs-in pcs-holiday-start" type="datetime-local"
+              value="${d.away_holiday_start || ""}">
+          </div>
+          <div class="pcs-field">
+            <label>End</label>
+            <input class="pcs-in pcs-holiday-end" type="datetime-local"
+              value="${d.away_holiday_end || ""}">
+          </div>
+          <button class="pcs-btn pcs-holiday-clear">Clear holiday window</button>
+        </div>`;
     }
     if (this._settingsTab === "childlock") {
       const rows = (d.rooms || [])
@@ -611,6 +636,14 @@ class PrecisionClimateScheduleCard extends HTMLElement {
     if (presenceGrace) {
       this._settingsDraft.presence_grace = parseInt(presenceGrace.value, 10) || 10;
     }
+    const holidayStart = this._body.querySelector(".pcs-holiday-start");
+    if (holidayStart) {
+      this._settingsDraft.away_holiday_start = holidayStart.value || "";
+    }
+    const holidayEnd = this._body.querySelector(".pcs-holiday-end");
+    if (holidayEnd) {
+      this._settingsDraft.away_holiday_end = holidayEnd.value || "";
+    }
   }
 
   _wireSettings() {
@@ -637,6 +670,15 @@ class PrecisionClimateScheduleCard extends HTMLElement {
           }
         }
         this._settingsDraft.away_on = want;
+        this._render();
+      });
+    }
+    const holidayClear = this._body.querySelector(".pcs-holiday-clear");
+    if (holidayClear) {
+      holidayClear.addEventListener("click", () => {
+        this._syncSettingsFromDom();
+        this._settingsDraft.away_holiday_start = "";
+        this._settingsDraft.away_holiday_end = "";
         this._render();
       });
     }
@@ -896,6 +938,11 @@ const STYLE = `
   .pcs-away-field { flex-direction: row; align-items: center; justify-content: space-between; max-width: 280px; gap: 12px; }
   .pcs-away-field label { flex: 1; }
   .pcs-away-field input { max-width: 90px; }
+
+  /* Holiday away */
+  .pcs-holiday { margin-top: 14px; padding-top: 10px; border-top: 1px solid var(--divider-color, #444); }
+  .pcs-holiday-title { font-weight: 600; font-size: .9em; margin-bottom: 4px; }
+  .pcs-holiday-clear { margin-top: 4px; }
 
   /* Presence mode */
   .pcs-presence-toggle { font-weight: 600; }

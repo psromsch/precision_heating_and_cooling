@@ -2,9 +2,13 @@
 
 from __future__ import annotations
 
-from homeassistant.components.sensor import SensorDeviceClass, SensorEntity
+from homeassistant.components.sensor import (
+    SensorDeviceClass,
+    SensorEntity,
+    SensorStateClass,
+)
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import UnitOfTemperature
+from homeassistant.const import UnitOfTemperature, UnitOfTime
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity import EntityCategory
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
@@ -22,6 +26,14 @@ async def async_setup_entry(
         for room in coordinator.config.rooms
     ]
     entities.append(SystemStatusSensor(coordinator, entry.entry_id))
+    entities.extend(
+        BoilerRuntimeSensor(coordinator, entry.entry_id, period, label)
+        for period, label in (
+            ("today", "Boiler Runtime Today"),
+            ("week", "Boiler Runtime This Week"),
+            ("month", "Boiler Runtime This Month"),
+        )
+    )
     async_add_entities(entities)
 
 
@@ -97,6 +109,8 @@ class SystemStatusSensor(PrecisionBaseEntity, SensorEntity):
             "presence_persons": c.config.presence.persons,
             "presence_grace_minutes": c.config.presence.grace_minutes,
             "away_source": c._away_source,
+            # Holiday-away window (absolute start/end), or None if unset.
+            "holiday_window": c.holiday_window,
         }
 
 
@@ -119,3 +133,26 @@ class RoomTargetSensor(PrecisionBaseEntity, SensorEntity):
     @property
     def extra_state_attributes(self) -> dict:
         return {"active": self._coordinator.resolved_active.get(self._room.room_id)}
+
+
+class BoilerRuntimeSensor(PrecisionBaseEntity, SensorEntity):
+    """Hours the boiler has been commanded on within a period.
+
+    Provided as plain entities (today / this week / this month) so the user can
+    build whatever charts they like; the integration doesn't render any itself.
+    """
+
+    _attr_device_class = SensorDeviceClass.DURATION
+    _attr_native_unit_of_measurement = UnitOfTime.HOURS
+    _attr_state_class = SensorStateClass.TOTAL
+    _attr_icon = "mdi:fire-circle"
+
+    def __init__(self, coordinator, entry_id: str, period: str, label: str) -> None:
+        super().__init__(coordinator, entry_id)
+        self._period = period
+        self._attr_name = label
+        self._attr_unique_id = f"{entry_id}_boiler_runtime_{period}"
+
+    @property
+    def native_value(self) -> float:
+        return round(self._coordinator.boiler_runtime_hours(self._period), 3)

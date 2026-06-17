@@ -37,7 +37,9 @@ from homeassistant.helpers.event import (
     async_call_later,
     async_track_point_in_time,
     async_track_state_change_event,
+    async_track_time_interval,
 )
+from homeassistant.helpers.storage import Store
 import homeassistant.util.dt as dt_util
 
 from .const import (
@@ -64,18 +66,24 @@ from .failsafes.logic import (
 )
 from .models.room import RoomState, SystemState
 from .models.runtime import RuntimeConfig, build_runtime
+from .runtime_stats import BoilerRuntimeTracker
 from .scheduler.engine import next_boundary, resolve_active_set
 
 _LOGGER = logging.getLogger(__name__)
+
+# How often to fold live boiler on-time into the runtime counters (and refresh
+# the runtime sensors / handle period rollover) while nothing else triggers.
+RUNTIME_TICK = timedelta(minutes=5)
 
 
 class PrecisionClimateCoordinator:
     """Owns the runtime state and drives the control loop."""
 
-    def __init__(self, hass: HomeAssistant, entry_data: dict) -> None:
+    def __init__(self, hass: HomeAssistant, entry_data: dict, entry_id: str | None = None) -> None:
         self.hass = hass
         self.config: RuntimeConfig = build_runtime(entry_data)
         self.mode = Mode.HEAT
+        self._entry_id = entry_id
 
         # User-facing master controls (mutated by the master switch / pause entities).
         self.master_on: bool = True
@@ -109,6 +117,19 @@ class PrecisionClimateCoordinator:
 
         # Sunny-day savings (assessed once per morning).
         self._sunny_active: bool = False
+
+        # Boiler runtime accounting (today / week / month). Persisted via a Store
+        # so the counters survive restarts; on_since is re-anchored at startup.
+        self._runtime = BoilerRuntimeTracker()
+        self._runtime_store: Store | None = (
+            Store(hass, 1, f"{DOMAIN}_{entry_id}_boiler_runtime")
+            if entry_id is not None
+            else None
+        )
+        self._runtime_tick_unsub = None
+
+        # Holiday-away absolute-datetime triggers (start + end), re-armed on setup.
+        self._holiday_unsubs: list = []
 
         # Subscriptions to clean up on unload.
         self._unsubs: list = []
@@ -164,6 +185,16 @@ class PrecisionClimateCoordinator:
         # it off). Without this, a fresh coordinator assumes everything is off
         # and would skip the corrective service call.
         self._reconcile_initial_state()
+        # Restore the boiler runtime counters and re-anchor from the *real* boiler
+        # state (downtime must not count as heating, so on_since starts fresh).
+        if self._runtime_store is not None:
+            self._runtime.restore(await self._runtime_store.async_load())
+        self._runtime.set_boiler(self._boiler_on, dt_util.utcnow())
+        self._runtime_tick_unsub = async_track_time_interval(
+            self.hass, self._handle_runtime_tick, RUNTIME_TICK
+        )
+        # Arm the holiday-away window (restart-safe; evaluates current state too).
+        self._setup_holiday_schedule()
         # Trigger 4: startup safety check — force reality to match the logic.
         await self.async_evaluate()
 
@@ -208,6 +239,15 @@ class PrecisionClimateCoordinator:
         for room_id in list(self._boost_unsub):
             self._cancel_boost_timer(room_id)
         self._cancel_grace_timer()
+        if self._runtime_tick_unsub is not None:
+            self._runtime_tick_unsub()
+            self._runtime_tick_unsub = None
+        for unsub in self._holiday_unsubs:
+            unsub()
+        self._holiday_unsubs.clear()
+        # Persist final runtime counters on the way out.
+        self._runtime.tick(dt_util.utcnow())
+        self._save_runtime()
 
     # --- Triggers ------------------------------------------------------------
 
@@ -429,6 +469,9 @@ class PrecisionClimateCoordinator:
         # Boiler.
         if decision.boiler_on != self._boiler_on:
             await self._set_switch(self.config.boiler_switch, decision.boiler_on)
+            # Account the transition for the runtime counters (today/week/month).
+            self._runtime.set_boiler(decision.boiler_on, dt_util.utcnow())
+            self._save_runtime()
         self._boiler_on = decision.boiler_on
 
         # TRVs.
@@ -543,8 +586,8 @@ class PrecisionClimateCoordinator:
         cfg = self.config.presence
         if not cfg.enabled or not cfg.persons or not cfg.zone:
             return
-        # Manual-away is never overridden by presence.
-        if self._away_source == "manual":
+        # Manual- and holiday-away are never overridden by presence.
+        if self._away_source in ("manual", "holiday"):
             return
 
         anyone_home = self._is_anyone_home()
@@ -590,7 +633,7 @@ class PrecisionClimateCoordinator:
         # Re-check in case someone returned while the timer was running.
         if self._is_anyone_home():
             return
-        if self._away_source == "manual":
+        if self._away_source in ("manual", "holiday"):
             return
         await self._async_set_away_presence(True)
 
@@ -622,6 +665,112 @@ class PrecisionClimateCoordinator:
         if self._grace_unsub is not None:
             self._grace_unsub()
             self._grace_unsub = None
+
+    # --- Boiler runtime accounting -------------------------------------------
+
+    @callback
+    def _handle_runtime_tick(self, _now) -> None:
+        """Periodic tick: fold live on-time in, roll periods over, refresh."""
+        self._runtime.tick(dt_util.utcnow())
+        self._save_runtime()
+        self._notify_listeners()
+
+    def _save_runtime(self) -> None:
+        if self._runtime_store is not None:
+            # Debounced write; coalesces frequent transitions into one disk write.
+            self._runtime_store.async_delay_save(self._runtime.to_dict, 30)
+
+    def boiler_runtime_hours(self, period: str) -> float:
+        """Boiler on-time in hours for 'today' | 'week' | 'month'."""
+        return self._runtime.hours(period, dt_util.utcnow())
+
+    # --- Holiday away (absolute start/end window) ----------------------------
+
+    def _parse_holiday(self, key: str) -> datetime | None:
+        """Parse a stored local ISO datetime; return tz-aware or None."""
+        raw = self.config.settings.get(key)
+        if not raw:
+            return None
+        parsed = dt_util.parse_datetime(str(raw))
+        if parsed is None:
+            return None
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=dt_util.DEFAULT_TIME_ZONE)
+        return parsed
+
+    def _setup_holiday_schedule(self) -> None:
+        """Arm the holiday start/end triggers and apply the current window state.
+
+        Restart-safe: we compare absolute datetimes to ``now`` and re-arm on
+        every setup, so a reboot inside the window re-engages immediately and a
+        reboot after the window leaves things clear — no countdown to lose.
+        """
+        for unsub in self._holiday_unsubs:
+            unsub()
+        self._holiday_unsubs.clear()
+
+        start = self._parse_holiday("away_holiday_start")
+        end = self._parse_holiday("away_holiday_end")
+        now = dt_util.now()
+
+        in_window = (
+            start is not None and now >= start and (end is None or now < end)
+        )
+        if in_window:
+            self.hass.async_create_task(self._async_set_away_holiday(True))
+        elif end is not None and now >= end and self._away_source == "holiday":
+            # Window already ended (e.g. set entirely in the past): make sure a
+            # previously-engaged holiday away is released.
+            self.hass.async_create_task(self._async_set_away_holiday(False))
+
+        if start is not None and now < start:
+            self._holiday_unsubs.append(
+                async_track_point_in_time(self.hass, self._handle_holiday_start, start)
+            )
+        if end is not None and now < end:
+            self._holiday_unsubs.append(
+                async_track_point_in_time(self.hass, self._handle_holiday_end, end)
+            )
+
+    @callback
+    def _handle_holiday_start(self, _now) -> None:
+        self.hass.async_create_task(self._async_set_away_holiday(True))
+
+    @callback
+    def _handle_holiday_end(self, _now) -> None:
+        self.hass.async_create_task(self._async_set_away_holiday(False))
+
+    async def _async_set_away_holiday(self, on: bool) -> None:
+        """Engage/disengage away mode from the holiday window."""
+        if on:
+            # Never override a manual away (the user is explicitly in control).
+            if self._away_on and self._away_source == "manual":
+                return
+            self._away_on = True
+            self._away_source = "holiday"
+        else:
+            # Only release what the holiday engaged; leave manual/presence alone.
+            if self._away_source != "holiday":
+                return
+            self._away_on = False
+            self._away_source = None
+        away_switch = self._away_switch_entity_id()
+        if away_switch:
+            await self._set_switch(away_switch, on)
+        await self.async_evaluate()
+        self._notify_listeners()
+        if not on:
+            # Hand control back to presence in case nobody is home.
+            await self._async_evaluate_presence()
+
+    @property
+    def holiday_window(self) -> dict | None:
+        """The configured holiday window as ISO strings, or None if unset."""
+        start = self.config.settings.get("away_holiday_start")
+        end = self.config.settings.get("away_holiday_end")
+        if not start and not end:
+            return None
+        return {"start": start or None, "end": end or None}
 
     # --- Public control surface (used by entities) ---------------------------
 

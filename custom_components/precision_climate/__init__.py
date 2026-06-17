@@ -17,6 +17,7 @@ PLATFORMS: list[str] = ["switch", "binary_sensor", "sensor"]
 
 SERVICE_SET_SCHEDULE = "set_schedule"
 SERVICE_SET_ROOM_PAUSE = "set_room_pause"
+SERVICE_SET_ROOM_BOOST = "set_room_boost"
 SERVICE_SET_SETTINGS = "set_settings"
 # Frontend modules served and auto-loaded by the integration.
 CARD_FILENAMES = [
@@ -151,6 +152,36 @@ def _async_register_services(hass: HomeAssistant) -> None:
 
     hass.services.async_register(
         DOMAIN, SERVICE_SET_ROOM_PAUSE, _handle_set_room_pause, schema=pause_schema
+    )
+
+    boost_schema = vol.Schema(
+        {
+            vol.Required("room_id"): str,
+            vol.Optional("target"): vol.Coerce(float),
+            vol.Optional("cancel"): vol.Coerce(bool),
+        }
+    )
+
+    async def _handle_set_room_boost(call: "ServiceCall") -> None:
+        room_id = call.data["room_id"]
+        cancel = call.data.get("cancel", False)
+        target = call.data.get("target")
+        for entry in hass.config_entries.async_entries(DOMAIN):
+            coordinator = hass.data.get(DOMAIN, {}).get(entry.entry_id)
+            if coordinator is None:
+                continue
+            if any(r.room_id == room_id for r in coordinator.config.rooms):
+                if cancel:
+                    await coordinator.async_cancel_room_boost(room_id)
+                elif target is not None:
+                    await coordinator.async_set_room_boost(room_id, target)
+                else:
+                    raise vol.Invalid("Provide 'target' to boost, or 'cancel: true'")
+                return
+        raise vol.Invalid(f"No configured room '{room_id}' found")
+
+    hass.services.async_register(
+        DOMAIN, SERVICE_SET_ROOM_BOOST, _handle_set_room_boost, schema=boost_schema
     )
 
     settings_schema = vol.Schema(

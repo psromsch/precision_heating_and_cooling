@@ -55,6 +55,41 @@ set_room_pause:
       selector:
         boolean:
 
+set_room_boost:
+  name: Boost or cancel a room's boost
+  description: >
+    Boost a room to a target temperature (and make it active) for the
+    configured boost duration, overriding its schedule. Calling again refreshes
+    the target and restarts the timer. Normally triggered automatically when you
+    change a TRV's setpoint by hand; can also be called directly. Use cancel to
+    end a boost immediately.
+  fields:
+    room_id:
+      name: Room ID
+      description: The room's id (slug), e.g. living.
+      required: true
+      example: living
+      selector:
+        text:
+    target:
+      name: Target
+      description: Boost target in °C. Required unless cancel is true.
+      required: false
+      example: 21
+      selector:
+        number:
+          min: 5
+          max: 30
+          step: 0.1
+          unit_of_measurement: "°C"
+    cancel:
+      name: Cancel
+      description: true to end the room's boost immediately.
+      required: false
+      example: true
+      selector:
+        boolean:
+
 set_settings:
   name: Update global settings
   description: >

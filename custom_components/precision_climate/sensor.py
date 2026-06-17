@@ -56,6 +56,7 @@ class SystemStatusSensor(PrecisionBaseEntity, SensorEntity):
         rooms = {}
         for room in c.config.rooms:
             rid = room.room_id
+            boost = c.room_boost(rid)
             rooms[room.name] = {
                 "room_id": rid,
                 "temperature": c.observed_temps.get(rid),
@@ -64,6 +65,9 @@ class SystemStatusSensor(PrecisionBaseEntity, SensorEntity):
                 "trv_open": c.trv_open.get(rid),
                 "heating": c.room_heating.get(rid),
                 "paused": c.room_paused(rid),
+                "boosted": boost is not None,
+                "boost_target": boost["target"] if boost else None,
+                "boost_expires": boost["expires"].isoformat() if boost else None,
                 # Source entity_ids so the history card can plot recorded data
                 # without any per-room dashboard configuration.
                 "thermometer_entity_id": room.thermometer,

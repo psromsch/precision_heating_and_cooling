@@ -11,16 +11,19 @@ The coordinator is the only place that talks to HA in the control path. It:
     control loop + failsafe timers, and applies the resulting decision by
     calling switch/climate services.
 
-It deliberately does NOT re-evaluate on TRV state changes, to avoid the
-command/confirm feedback loop. The decision logic itself lives in the
-unit-tested ``control``, ``scheduler`` and ``failsafes`` modules.
+It does not re-evaluate on the *valve commands* it issues to TRVs (the
+force/block sentinels), to avoid a command/confirm feedback loop. It does,
+however, watch TRV setpoints for *manual* changes (any value that isn't one of
+our sentinels): a manual change starts "Boost Mode" for that room. The decision
+logic itself lives in the unit-tested ``control``, ``scheduler`` and
+``failsafes`` modules.
 """
 
 from __future__ import annotations
 
 import logging
 import time
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from homeassistant.const import (
     ATTR_ENTITY_ID,
@@ -31,6 +34,7 @@ from homeassistant.const import (
 )
 from homeassistant.core import Event, HomeAssistant, callback
 from homeassistant.helpers.event import (
+    async_call_later,
     async_track_point_in_time,
     async_track_state_change_event,
 )
@@ -79,6 +83,15 @@ class PrecisionClimateCoordinator:
         # Per-room pause: paused rooms get their target dropped to PAUSE_TARGET
         # until resumed. Set is seeded by the per-room pause switches on restore.
         self._room_paused: set[str] = set()
+        # Per-room boost: a manual TRV change overrides the schedule target AND
+        # active/passive flag for a configured number of hours. Maps room_id ->
+        # {"target": float, "expires": datetime (UTC)}. Each has an expiry timer.
+        self._room_boost: dict[str, dict] = {}
+        self._boost_unsub: dict[str, object] = {}
+        # Map every TRV entity back to its room, for manual-change detection.
+        self._trv_to_room: dict[str, str] = {
+            trv: r.room_id for r in self.config.rooms for trv in r.trvs
+        }
 
         # Commanded state (what we last told HA to do).
         self._boiler_on: bool = False
@@ -127,6 +140,13 @@ class PrecisionClimateCoordinator:
             self._unsubs.append(
                 async_track_state_change_event(self.hass, tracked, self._handle_state_event)
             )
+        # Watch TRV setpoints for *manual* changes -> Boost Mode. (Our own valve
+        # commands are filtered out inside the handler.)
+        trvs = list(self._trv_to_room)
+        if trvs:
+            self._unsubs.append(
+                async_track_state_change_event(self.hass, trvs, self._handle_trv_event)
+            )
         self._schedule_next_boundary()
         # Seed the commanded state from the REAL entities so the first evaluation
         # produces a genuine delta when reality disagrees with the decision
@@ -166,6 +186,8 @@ class PrecisionClimateCoordinator:
         if self._boundary_unsub:
             self._boundary_unsub()
             self._boundary_unsub = None
+        for room_id in list(self._boost_unsub):
+            self._cancel_boost_timer(room_id)
 
     # --- Triggers ------------------------------------------------------------
 
@@ -189,6 +211,51 @@ class PrecisionClimateCoordinator:
     @callback
     def _handle_state_event(self, event: Event) -> None:
         self.hass.async_create_task(self.async_evaluate())
+
+    @callback
+    def _handle_trv_event(self, event: Event) -> None:
+        """Detect a *manual* TRV setpoint change and start Boost Mode.
+
+        We only ever command the force/block sentinels, so any other reported
+        setpoint can only have come from a human. Re-touching any TRV in a room
+        restarts the boost timer.
+        """
+        room_id = self._trv_to_room.get(event.data.get("entity_id"))
+        if room_id is None:
+            return
+        new_state = event.data.get("new_state")
+        if new_state is None:
+            return
+        new_target = new_state.attributes.get(ATTR_TEMPERATURE)
+        try:
+            new_target = float(new_target) if new_target is not None else None
+        except (ValueError, TypeError):
+            new_target = None
+        if new_target is None:
+            return
+
+        old_state = event.data.get("old_state")
+        old_target = None
+        if old_state is not None:
+            ot = old_state.attributes.get(ATTR_TEMPERATURE)
+            try:
+                old_target = float(ot) if ot is not None else None
+            except (ValueError, TypeError):
+                old_target = None
+
+        # Ignore non-setpoint attribute churn (e.g. current_temperature updates).
+        if old_target is not None and abs(old_target - new_target) < 0.05:
+            return
+        # Ignore our own valve commands (the force/block sentinels).
+        if self._is_trv_sentinel(new_target):
+            return
+        self.hass.async_create_task(self.async_set_room_boost(room_id, new_target))
+
+    def _is_trv_sentinel(self, value: float) -> bool:
+        """True if a setpoint is (near) one of our force/block valve commands."""
+        force = force_flow_setpoint(self.mode)
+        block = block_flow_setpoint(self.mode)
+        return abs(value - force) < 0.6 or abs(value - block) < 0.6
 
     @callback
     def _handle_boundary(self, _now: datetime) -> None:
@@ -278,6 +345,14 @@ class PrecisionClimateCoordinator:
         for r in resolved:
             if r.room_id in self._room_paused:
                 r.target = PAUSE_TARGET
+        # Boost overrides both the schedule target and the active/passive flag
+        # for the boost window. Prune expired boosts first; boost wins over pause.
+        self._prune_expired_boosts()
+        for r in resolved:
+            boost = self._room_boost.get(r.room_id)
+            if boost is not None:
+                r.target = boost["target"]
+                r.is_active = True
         self.resolved_targets = {r.room_id: r.target for r in resolved}
         self.resolved_active = {r.room_id: r.is_active for r in resolved}
 
@@ -450,6 +525,52 @@ class PrecisionClimateCoordinator:
         else:
             self._room_paused.discard(room_id)
         await self.async_evaluate()
+
+    # --- Boost ---------------------------------------------------------------
+
+    def room_boost(self, room_id: str) -> dict | None:
+        """Return {"target", "expires"} for a boosted room, or None."""
+        return self._room_boost.get(room_id)
+
+    async def async_set_room_boost(self, room_id: str, target: float) -> None:
+        """Boost a room to ``target`` for the configured duration, (re)starting
+        the timer. Re-calling refreshes both the target and the expiry."""
+        hours = self.config.boost_duration_hours
+        self._room_boost[room_id] = {
+            "target": float(target),
+            "expires": dt_util.utcnow() + timedelta(hours=hours),
+        }
+        self._cancel_boost_timer(room_id)
+        self._boost_unsub[room_id] = async_call_later(
+            self.hass, hours * 3600.0, self._make_boost_expiry(room_id)
+        )
+        await self.async_evaluate()
+
+    async def async_cancel_room_boost(self, room_id: str) -> None:
+        """End a room's boost immediately and return it to its schedule."""
+        self._room_boost.pop(room_id, None)
+        self._cancel_boost_timer(room_id)
+        await self.async_evaluate()
+
+    def _make_boost_expiry(self, room_id: str):
+        @callback
+        def _expire(_now) -> None:
+            self._boost_unsub.pop(room_id, None)
+            self.hass.async_create_task(self.async_cancel_room_boost(room_id))
+
+        return _expire
+
+    def _cancel_boost_timer(self, room_id: str) -> None:
+        unsub = self._boost_unsub.pop(room_id, None)
+        if unsub is not None:
+            unsub()
+
+    def _prune_expired_boosts(self) -> None:
+        now = dt_util.utcnow()
+        for rid in list(self._room_boost):
+            if self._room_boost[rid]["expires"] <= now:
+                self._room_boost.pop(rid, None)
+                self._cancel_boost_timer(rid)
 
     @property
     def room_heating(self) -> dict[str, bool]:

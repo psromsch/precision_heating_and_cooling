@@ -23,7 +23,7 @@
  * No build step, no external dependencies.
  */
 
-const HISTORY_CARD_VERSION = "0.2.8";
+const HISTORY_CARD_VERSION = "0.2.9";
 
 // Per-room line colours, assigned round-robin in discovery order.
 const ROOM_COLORS = [
@@ -234,12 +234,21 @@ class PrecisionClimateHistoryCard extends HTMLElement {
       `<span class="pch-stat" style="color:${color}">${curTemp != null ? curTemp.toFixed(1) + "°" : "—"}</span>` +
       `<span class="pch-stat pch-target-stat">target ${curTarget != null ? curTarget.toFixed(1) + "°" : "—"}</span>`;
 
+    // Y-axis: 4 evenly-spaced ticks (hi, 2 intermediate, lo).
+    const NUM_TICKS = 4;
+    const ticks = Array.from({ length: NUM_TICKS }, (_, i) => hi - (i / (NUM_TICKS - 1)) * (hi - lo));
+
+    // Horizontal gridlines at each tick.
+    const hGrid = ticks.map((v) => {
+      const y = ys(v).toFixed(1);
+      return `<line x1="0" y1="${y}" x2="${W}" y2="${y}" stroke="var(--divider-color,#444)" stroke-width="1" opacity="0.5" vector-effect="non-scaling-stroke"/>`;
+    }).join("");
+
     // Y-axis labels rendered as HTML (outside SVG) so they don't distort with
     // preserveAspectRatio="none" scaling. Shown on both left and right sides.
     const yAxisHtml = (cls) => `
       <div class="${cls}">
-        <span>${hi.toFixed(1)}</span>
-        <span>${lo.toFixed(1)}</span>
+        ${ticks.map((v) => `<span>${v.toFixed(1)}</span>`).join("")}
       </div>`;
 
     return `
@@ -252,6 +261,7 @@ class PrecisionClimateHistoryCard extends HTMLElement {
           ${yAxisHtml("pch-yaxis")}
           <div class="pch-chart-area">
             <svg class="pch-svg" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none">
+              ${hGrid}
               ${grid}
               ${bands}
               <path d="${targetPath}" fill="none" stroke="var(--error-color,#d9663b)" stroke-width="2" vector-effect="non-scaling-stroke"/>

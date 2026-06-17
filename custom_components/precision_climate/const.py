@@ -102,6 +102,14 @@ CONF_PRESENCE_ZONE = "presence_zone"         # zone entity_id e.g. zone.santiago
 CONF_PRESENCE_GRACE_MINUTES = "presence_grace_minutes"
 DEFAULT_PRESENCE_GRACE_MINUTES = 10
 
+# Holiday away: an absolute start/end datetime window during which away mode is
+# engaged automatically. Stored as local ISO datetime strings in CONF_SETTINGS.
+# The schedule is re-armed from these absolute datetimes on every startup, so it
+# is restart-safe: it fires once at the start and once at the end, never relies
+# on a running countdown that a reboot could lose.
+CONF_AWAY_HOLIDAY_START = "away_holiday_start"
+CONF_AWAY_HOLIDAY_END = "away_holiday_end"
+
 # --- Failsafe default thresholds (seconds / degrees) -------------------------
 PROLONGED_HEATING_SECONDS = 5 * 60 * 60        # 5 hours of continuous boiler run
 TRV_MISMATCH_SECONDS = 10 * 60                 # boiler on 10 min with wrong TRV target

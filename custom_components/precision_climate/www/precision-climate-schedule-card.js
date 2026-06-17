@@ -30,7 +30,7 @@ const DAY_ORDER = ["all", "weekday", "weekend", "mon", "tue", "wed", "thu", "fri
 
 // Shown in the card footer so you can confirm which card version is live
 // after a HACS update (keep in sync with manifest.json).
-const CARD_VERSION = "0.7.0";
+const CARD_VERSION = "0.9.0";
 
 const pad = (n) => String(n).padStart(2, "0");
 const minToHHMM = (m) => {
@@ -245,6 +245,13 @@ class PrecisionClimateScheduleCard extends HTMLElement {
       });
     });
 
+    this._body.querySelectorAll("[data-room-away]").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const [rid, flag] = btn.getAttribute("data-room-away").split("|");
+        this._setRoomAway(rid, flag === "1");
+      });
+    });
+
     const masterBtn = this._body.querySelector("[data-master-toggle]");
     if (masterBtn) {
       masterBtn.addEventListener("click", () => {
@@ -299,6 +306,7 @@ class PrecisionClimateScheduleCard extends HTMLElement {
     const presencePersons = statusState ? (statusState.attributes.presence_persons || []) : [];
     const presenceZone = statusState ? (statusState.attributes.presence_zone || "") : "";
     const presenceGrace = statusState ? (statusState.attributes.presence_grace_minutes ?? 10) : 10;
+    const holiday = (statusState && statusState.attributes.holiday_window) || {};
     this._settingsDraft = {
       boost_duration_hours: Number(s.boost_duration_hours ?? 1),
       away_on: status ? status.attributes.away_on === true : false,
@@ -313,6 +321,9 @@ class PrecisionClimateScheduleCard extends HTMLElement {
       presence_persons: presencePersons,
       presence_zone: presenceZone,
       presence_grace: presenceGrace,
+      // Holiday away window (absolute datetimes, local "YYYY-MM-DDTHH:MM").
+      away_holiday_start: holiday.start || "",
+      away_holiday_end: holiday.end || "",
     };
     schedules.forEach((r) => {
       this._settingsDraft.away_targets[r.room_id] = Number(awayTargets[r.room_id] ?? 16);
@@ -354,6 +365,8 @@ class PrecisionClimateScheduleCard extends HTMLElement {
       presence_zone: draft.presence_zone || "",
       presence_persons: draft.presence_persons || [],
       presence_grace_minutes: Number(draft.presence_grace) || 10,
+      away_holiday_start: draft.away_holiday_start || "",
+      away_holiday_end: draft.away_holiday_end || "",
     };
     try {
       await this._hass.callService("precision_climate", "set_settings", {
@@ -388,6 +401,18 @@ class PrecisionClimateScheduleCard extends HTMLElement {
       });
     } catch (err) {
       this._error = (err && err.message) || "Could not cancel boost.";
+      this._render();
+    }
+  }
+
+  async _setRoomAway(roomId, away) {
+    try {
+      await this._hass.callService("precision_climate", "set_room_away", {
+        room_id: roomId,
+        away,
+      });
+    } catch (err) {
+      this._error = (err && err.message) || "Could not change room away state.";
       this._render();
     }
   }
@@ -501,7 +526,26 @@ class PrecisionClimateScheduleCard extends HTMLElement {
           wins). Active/passive periods stay exactly as scheduled. The toggle
           takes effect immediately; the per-room targets are saved with Save.
         </div>
-        ${rows}`;
+        ${rows}
+        <div class="pcs-holiday">
+          <div class="pcs-holiday-title">🏖️ Holiday away (optional)</div>
+          <div class="pcs-hint">
+            Away mode turns on automatically at the start datetime and off at the
+            end datetime. It fires once at each — restart-safe, no countdown.
+            Leave both blank to disable.
+          </div>
+          <div class="pcs-field">
+            <label>Start</label>
+            <input class="pcs-in pcs-holiday-start" type="datetime-local"
+              value="${d.away_holiday_start || ""}">
+          </div>
+          <div class="pcs-field">
+            <label>End</label>
+            <input class="pcs-in pcs-holiday-end" type="datetime-local"
+              value="${d.away_holiday_end || ""}">
+          </div>
+          <button class="pcs-btn pcs-holiday-clear">Clear holiday window</button>
+        </div>`;
     }
     if (this._settingsTab === "childlock") {
       const rows = (d.rooms || [])
@@ -611,6 +655,14 @@ class PrecisionClimateScheduleCard extends HTMLElement {
     if (presenceGrace) {
       this._settingsDraft.presence_grace = parseInt(presenceGrace.value, 10) || 10;
     }
+    const holidayStart = this._body.querySelector(".pcs-holiday-start");
+    if (holidayStart) {
+      this._settingsDraft.away_holiday_start = holidayStart.value || "";
+    }
+    const holidayEnd = this._body.querySelector(".pcs-holiday-end");
+    if (holidayEnd) {
+      this._settingsDraft.away_holiday_end = holidayEnd.value || "";
+    }
   }
 
   _wireSettings() {
@@ -637,6 +689,15 @@ class PrecisionClimateScheduleCard extends HTMLElement {
           }
         }
         this._settingsDraft.away_on = want;
+        this._render();
+      });
+    }
+    const holidayClear = this._body.querySelector(".pcs-holiday-clear");
+    if (holidayClear) {
+      holidayClear.addEventListener("click", () => {
+        this._syncSettingsFromDom();
+        this._settingsDraft.away_holiday_start = "";
+        this._settingsDraft.away_holiday_end = "";
         this._render();
       });
     }
@@ -685,6 +746,10 @@ class PrecisionClimateScheduleCard extends HTMLElement {
     const paused = !!info.paused;
     const pausedBadge = paused ? `<span class="pcs-paused-badge">paused</span>` : "";
     const pauseBtn = `<button class="pcs-btn pcs-pause-btn ${paused ? "pcs-resume" : ""}" data-pause="${room.room_id}|${paused ? "0" : "1"}" title="${paused ? "Resume room" : "Pause room (target 5°C until resumed)"}">${paused ? "▶ Resume" : "⏸ Pause"}</button>`;
+    const roomAway = !!info.room_away;
+    const awayTarget = info.away_target != null ? `${Number(info.away_target).toFixed(1)}°` : "";
+    const roomAwayBadge = roomAway ? `<span class="pcs-room-away-badge">🏠 away${awayTarget ? ` (${awayTarget})` : ""}</span>` : "";
+    const roomAwayBtn = `<button class="pcs-btn pcs-room-away-btn ${roomAway ? "pcs-room-away-active" : ""}" data-room-away="${room.room_id}|${roomAway ? "0" : "1"}" title="${roomAway ? "Disable away for this room" : "Enable away for this room (caps at away target)"}">${roomAway ? "🏠 Room away" : "🏠 Away"}</button>`;
 
     // Boost: manual TRV override active for a window. Show a badge + cancel
     // button, and overlay a band on each timeline from now until it expires.
@@ -743,10 +808,10 @@ class PrecisionClimateScheduleCard extends HTMLElement {
       })
       .join("");
 
-    return `<div class="pcs-room${paused ? " pcs-room-paused" : ""}${boosted ? " pcs-room-boosted" : ""}">
+    return `<div class="pcs-room${paused ? " pcs-room-paused" : ""}${boosted ? " pcs-room-boosted" : ""}${roomAway ? " pcs-room-away" : ""}">
       <div class="pcs-room-name">
-        <span class="pcs-room-name-text">${room.name}${heatIcon}${tempSpan}${pausedBadge}${boostBadge}</span>
-        <span class="pcs-room-actions">${boostBtn}${pauseBtn}</span>
+        <span class="pcs-room-name-text">${room.name}${heatIcon}${tempSpan}${pausedBadge}${boostBadge}${roomAwayBadge}</span>
+        <span class="pcs-room-actions">${boostBtn}${roomAwayBtn}${pauseBtn}</span>
       </div>
       ${days}
     </div>`;
@@ -897,6 +962,11 @@ const STYLE = `
   .pcs-away-field label { flex: 1; }
   .pcs-away-field input { max-width: 90px; }
 
+  /* Holiday away */
+  .pcs-holiday { margin-top: 14px; padding-top: 10px; border-top: 1px solid var(--divider-color, #444); }
+  .pcs-holiday-title { font-weight: 600; font-size: .9em; margin-bottom: 4px; }
+  .pcs-holiday-clear { margin-top: 4px; }
+
   /* Presence mode */
   .pcs-presence-toggle { font-weight: 600; }
   .pcs-presence-field-wide { max-width: 360px; }
@@ -919,6 +989,12 @@ const STYLE = `
   .pcs-pause-btn.pcs-resume { border-color: var(--warning-color, #d9a13b); color: var(--warning-color, #d9a13b); }
   .pcs-room-paused .pcs-timeline { opacity: .5; }
   .pcs-room-actions { display: flex; align-items: center; gap: 6px; }
+
+  /* Per-room away mode */
+  .pcs-room-away-badge { font-weight: 600; font-size: .72em; text-transform: uppercase; letter-spacing: .04em; padding: 1px 6px; border-radius: 8px; background: #2563eb; color: #fff; white-space: nowrap; }
+  .pcs-room-away-btn { white-space: nowrap; }
+  .pcs-room-away-active { border-color: #2563eb; color: #93c5fd; font-weight: 600; }
+  .pcs-room-away .pcs-timeline { opacity: .65; }
 
   /* Boost */
   .pcs-boost-badge { font-weight: 600; font-size: .72em; text-transform: uppercase; letter-spacing: .03em; padding: 1px 6px; border-radius: 8px; background: #8b5cf6; color: #fff; white-space: nowrap; }

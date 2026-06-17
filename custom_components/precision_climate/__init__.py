@@ -33,7 +33,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     # Home Assistant installed (e.g. in the unit-test sandbox).
     from .coordinator import PrecisionClimateCoordinator
 
-    coordinator = PrecisionClimateCoordinator(hass, {**entry.data, **entry.options})
+    coordinator = PrecisionClimateCoordinator(
+        hass, {**entry.data, **entry.options}, entry.entry_id
+    )
     await coordinator.async_setup()
 
     hass.data.setdefault(DOMAIN, {})[entry.entry_id] = coordinator
@@ -57,7 +59,14 @@ def _async_cleanup_orphan_entities(hass, entry, coordinator) -> None:
     from homeassistant.helpers import entity_registry as er
 
     entry_id = entry.entry_id
-    valid = {f"{entry_id}_master", f"{entry_id}_away", f"{entry_id}_status"}
+    valid = {
+        f"{entry_id}_master",
+        f"{entry_id}_away",
+        f"{entry_id}_status",
+        f"{entry_id}_boiler_runtime_today",
+        f"{entry_id}_boiler_runtime_week",
+        f"{entry_id}_boiler_runtime_month",
+    }
     for room in coordinator.config.rooms:
         valid.add(f"{entry_id}_{room.room_id}_target")
         valid.add(f"{entry_id}_{room.room_id}_heating")
@@ -153,6 +162,29 @@ def _async_register_services(hass: HomeAssistant) -> None:
 
     hass.services.async_register(
         DOMAIN, SERVICE_SET_ROOM_PAUSE, _handle_set_room_pause, schema=pause_schema
+    )
+
+    room_away_schema = vol.Schema(
+        {
+            vol.Required("room_id"): str,
+            vol.Required("away"): vol.Coerce(bool),
+        }
+    )
+
+    async def _handle_set_room_away(call: "ServiceCall") -> None:
+        room_id = call.data["room_id"]
+        away = call.data["away"]
+        for entry in hass.config_entries.async_entries(DOMAIN):
+            coordinator = hass.data.get(DOMAIN, {}).get(entry.entry_id)
+            if coordinator is None:
+                continue
+            if any(r.room_id == room_id for r in coordinator.config.rooms):
+                await coordinator.async_set_room_away(room_id, away)
+                return
+        raise vol.Invalid(f"No configured room '{room_id}' found")
+
+    hass.services.async_register(
+        DOMAIN, "set_room_away", _handle_set_room_away, schema=room_away_schema
     )
 
     boost_schema = vol.Schema(

@@ -95,6 +95,13 @@ CONF_SUNNY_END_MIN = "end_min"  # window ends at this minute-of-day (default mid
 DEFAULT_SUNNY_END_MIN = 12 * 60   # midday
 DEFAULT_SUNNY_TARGET = 17.0
 
+# Presence mode
+CONF_PRESENCE_ENABLED = "presence_enabled"
+CONF_PRESENCE_PERSONS = "presence_persons"   # list[str] of person entity_ids
+CONF_PRESENCE_ZONE = "presence_zone"         # zone entity_id e.g. zone.santiago
+CONF_PRESENCE_GRACE_MINUTES = "presence_grace_minutes"
+DEFAULT_PRESENCE_GRACE_MINUTES = 10
+
 # --- Failsafe default thresholds (seconds / degrees) -------------------------
 PROLONGED_HEATING_SECONDS = 5 * 60 * 60        # 5 hours of continuous boiler run
 TRV_MISMATCH_SECONDS = 10 * 60                 # boiler on 10 min with wrong TRV target

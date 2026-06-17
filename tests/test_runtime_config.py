@@ -143,6 +143,29 @@ def test_child_locks_default_empty():
     assert room.child_lock_entities == []
 
 
+def test_presence_config_defaults():
+    rt = build_runtime(sample_data())
+    assert rt.presence.enabled is False
+    assert rt.presence.persons == []
+    assert rt.presence.zone is None
+    assert rt.presence.grace_minutes == 10
+
+
+def test_presence_config_parsed():
+    data = sample_data()
+    data["settings"] = {
+        "presence_enabled": True,
+        "presence_persons": ["person.alice"],
+        "presence_zone": "zone.santiago",
+        "presence_grace_minutes": 5,
+    }
+    rt = build_runtime(data)
+    assert rt.presence.enabled is True
+    assert rt.presence.persons == ["person.alice"]
+    assert rt.presence.zone == "zone.santiago"
+    assert rt.presence.grace_minutes == 5
+
+
 def test_defaults_applied_when_optional_fields_missing():
     data = {
         "boiler_switch": "switch.b",

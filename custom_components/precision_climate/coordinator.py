@@ -103,6 +103,10 @@ class PrecisionClimateCoordinator:
         self._trv_open: dict[str, bool] = {r.room_id: False for r in self.config.rooms}
         self._room_heating: dict[str, bool] = {r.room_id: False for r in self.config.rooms}
 
+        # Away mode source tracking.
+        self._away_source: str | None = None   # "manual" | "presence" | None
+        self._grace_unsub = None               # async_call_later handle for the grace timer
+
         # Sunny-day savings (assessed once per morning).
         self._sunny_active: bool = False
 
@@ -153,6 +157,7 @@ class PrecisionClimateCoordinator:
                 async_track_state_change_event(self.hass, trvs, self._handle_trv_event)
             )
         self._schedule_next_boundary()
+        self._setup_presence_tracking()
         # Seed the commanded state from the REAL entities so the first evaluation
         # produces a genuine delta when reality disagrees with the decision
         # (e.g. the boiler was left on, or config changed and the loop now wants
@@ -184,6 +189,15 @@ class PrecisionClimateCoordinator:
                 for t in known
             )
 
+    def _setup_presence_tracking(self) -> None:
+        """Subscribe to person-entity state changes for presence mode."""
+        persons = self.config.presence.persons
+        if not persons:
+            return
+        self._unsubs.append(
+            async_track_state_change_event(self.hass, persons, self._handle_person_event)
+        )
+
     async def async_unload(self) -> None:
         for unsub in self._unsubs:
             unsub()
@@ -193,6 +207,7 @@ class PrecisionClimateCoordinator:
             self._boundary_unsub = None
         for room_id in list(self._boost_unsub):
             self._cancel_boost_timer(room_id)
+        self._cancel_grace_timer()
 
     # --- Triggers ------------------------------------------------------------
 
@@ -212,6 +227,10 @@ class PrecisionClimateCoordinator:
     def _notify_listeners(self) -> None:
         for update_callback in list(self._listeners):
             update_callback()
+
+    @callback
+    def _handle_person_event(self, event: Event) -> None:
+        self.hass.async_create_task(self._async_evaluate_presence())
 
     @callback
     def _handle_state_event(self, event: Event) -> None:
@@ -518,6 +537,92 @@ class PrecisionClimateCoordinator:
                 )
             )
 
+    # --- Presence mode -------------------------------------------------------
+
+    async def _async_evaluate_presence(self) -> None:
+        cfg = self.config.presence
+        if not cfg.enabled or not cfg.persons or not cfg.zone:
+            return
+        # Manual-away is never overridden by presence.
+        if self._away_source == "manual":
+            return
+
+        anyone_home = self._is_anyone_home()
+
+        if anyone_home:
+            # Cancel any pending grace timer and disengage presence-away immediately.
+            self._cancel_grace_timer()
+            if self._away_on and self._away_source == "presence":
+                await self._async_set_away_presence(False)
+        else:
+            # Nobody home: start grace timer if not already running and not already away.
+            if not self._away_on and self._grace_unsub is None:
+                self._grace_unsub = async_call_later(
+                    self.hass,
+                    cfg.grace_minutes * 60.0,
+                    self._make_grace_expiry(),
+                )
+
+    def _is_anyone_home(self) -> bool:
+        zone_eid = self.config.presence.zone
+        if not zone_eid:
+            return True   # no zone configured → assume home (safe default)
+        zone_state = self.hass.states.get(zone_eid)
+        if zone_state is None:
+            return True
+        zone_name = (zone_state.attributes.get("friendly_name") or "").lower()
+        for person_eid in self.config.presence.persons:
+            state = self.hass.states.get(person_eid)
+            if state is None:
+                continue
+            if state.state.lower() == zone_name or state.state.lower() == "home":
+                return True
+        return False
+
+    def _make_grace_expiry(self):
+        @callback
+        def _expire(_now) -> None:
+            self._grace_unsub = None
+            self.hass.async_create_task(self._async_engage_away_after_grace())
+        return _expire
+
+    async def _async_engage_away_after_grace(self) -> None:
+        # Re-check in case someone returned while the timer was running.
+        if self._is_anyone_home():
+            return
+        if self._away_source == "manual":
+            return
+        await self._async_set_away_presence(True)
+
+    async def _async_set_away_presence(self, on: bool) -> None:
+        """Engage/disengage away mode from presence automation."""
+        self._away_on = on
+        self._away_source = "presence" if on else None
+        # Keep the HA away switch in sync.
+        away_switch = self._away_switch_entity_id()
+        if away_switch:
+            await self._set_switch(away_switch, on)
+        await self.async_evaluate()
+        self._notify_listeners()
+
+    def _away_switch_entity_id(self) -> str | None:
+        """Resolve our own away switch entity_id from the entity registry."""
+        from homeassistant.helpers import entity_registry as er
+        registry = er.async_get(self.hass)
+        entry_id = next(
+            (eid for eid, c in self.hass.data.get("precision_climate", {}).items()
+             if c is self),
+            None,
+        )
+        if entry_id is None:
+            return None
+        return registry.async_get_entity_id("switch", "precision_climate", f"{entry_id}_away")
+
+    def _cancel_grace_timer(self) -> None:
+        if self._grace_unsub is not None:
+            self._grace_unsub()
+            self._grace_unsub = None
+
     # --- Public control surface (used by entities) ---------------------------
 
     async def async_set_master(self, on: bool) -> None:
@@ -532,9 +637,15 @@ class PrecisionClimateCoordinator:
     def away_on(self) -> bool:
         return self._away_on
 
-    async def async_set_away(self, on: bool) -> None:
+    async def async_set_away(self, on: bool, source: str = "manual") -> None:
         self._away_on = on
+        self._away_source = "manual" if on else None
+        # When manually disengaging, re-evaluate presence so it can re-engage
+        # if still nobody home (allows presence to take back control).
+        self._cancel_grace_timer()
         await self.async_evaluate()
+        if not on:
+            await self._async_evaluate_presence()
 
     def room_paused(self, room_id: str) -> bool:
         return room_id in self._room_paused

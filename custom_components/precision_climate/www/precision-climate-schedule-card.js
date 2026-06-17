@@ -30,7 +30,7 @@ const DAY_ORDER = ["all", "weekday", "weekend", "mon", "tue", "wed", "thu", "fri
 
 // Shown in the card footer so you can confirm which card version is live
 // after a HACS update (keep in sync with manifest.json).
-const CARD_VERSION = "0.5.0";
+const CARD_VERSION = "0.6.0";
 
 const pad = (n) => String(n).padStart(2, "0");
 const minToHHMM = (m) => {
@@ -294,6 +294,11 @@ class PrecisionClimateScheduleCard extends HTMLElement {
     const awayTargets = s.away_targets || {};
     const schedules = this._schedules();
     const roomsInfo = status ? status.attributes.rooms || {} : {};
+    const statusState = status;
+    const presenceEnabled = statusState ? statusState.attributes.presence_enabled === true : false;
+    const presencePersons = statusState ? (statusState.attributes.presence_persons || []) : [];
+    const presenceZone = statusState ? (statusState.attributes.presence_zone || "") : "";
+    const presenceGrace = statusState ? (statusState.attributes.presence_grace_minutes ?? 10) : 10;
     this._settingsDraft = {
       boost_duration_hours: Number(s.boost_duration_hours ?? 1),
       away_on: status ? status.attributes.away_on === true : false,
@@ -303,6 +308,11 @@ class PrecisionClimateScheduleCard extends HTMLElement {
       // Per-room child-lock entities + optimistic on-state (read from live state).
       child_lock_entities: {},
       child_lock_on: {},
+      // Presence mode fields.
+      presence_enabled: presenceEnabled,
+      presence_persons: presencePersons,
+      presence_zone: presenceZone,
+      presence_grace: presenceGrace,
     };
     schedules.forEach((r) => {
       this._settingsDraft.away_targets[r.room_id] = Number(awayTargets[r.room_id] ?? 16);
@@ -340,6 +350,10 @@ class PrecisionClimateScheduleCard extends HTMLElement {
     const patch = {
       boost_duration_hours: Number(draft.boost_duration_hours) || 1,
       away_targets: draft.away_targets || {},
+      presence_enabled: !!draft.presence_enabled,
+      presence_zone: draft.presence_zone || "",
+      presence_persons: draft.presence_persons || [],
+      presence_grace_minutes: Number(draft.presence_grace) || 10,
     };
     try {
       await this._hass.callService("precision_climate", "set_settings", {
@@ -516,6 +530,32 @@ class PrecisionClimateScheduleCard extends HTMLElement {
         </div>
         ${rows}`;
     }
+    if (this._settingsTab === "presence") {
+      const on = !!d.presence_enabled;
+      const toggle = `<button class="pcs-btn pcs-presence-toggle ${on ? "pcs-primary" : ""}" data-presence-toggle>
+        ${on ? "✅ Presence mode: ON" : "Presence mode: OFF"}</button>`;
+      return `
+        <div class="pcs-away-toggle-row">${toggle}</div>
+        <div class="pcs-hint">
+          When Presence mode is enabled, the system automatically switches to Away mode
+          when nobody is home (in the configured zone) for longer than the grace period.
+        </div>
+        <div class="pcs-field">
+          <label>Zone entity (e.g. zone.home)</label>
+          <input class="pcs-in pcs-presence-zone" type="text" placeholder="zone.home"
+            value="${d.presence_zone || ""}">
+        </div>
+        <div class="pcs-field">
+          <label>Person entities (comma-separated)</label>
+          <input class="pcs-in pcs-presence-persons" type="text" placeholder="person.alice, person.bob"
+            value="${(d.presence_persons || []).join(", ")}">
+        </div>
+        <div class="pcs-field">
+          <label>Grace period (minutes)</label>
+          <input class="pcs-in pcs-presence-grace" type="number" min="1" max="120" step="1"
+            value="${Number(d.presence_grace ?? 10)}">
+        </div>`;
+    }
     return `<div class="pcs-coming-soon">This section is coming soon.</div>`;
   }
 
@@ -527,6 +567,21 @@ class PrecisionClimateScheduleCard extends HTMLElement {
     this._body.querySelectorAll(".pcs-away-target").forEach((inp) => {
       this._settingsDraft.away_targets[inp.getAttribute("data-room")] = parseFloat(inp.value);
     });
+    const presenceZone = this._body.querySelector(".pcs-presence-zone");
+    if (presenceZone) {
+      this._settingsDraft.presence_zone = presenceZone.value.trim();
+    }
+    const presencePersons = this._body.querySelector(".pcs-presence-persons");
+    if (presencePersons) {
+      this._settingsDraft.presence_persons = presencePersons.value
+        .split(",")
+        .map((s) => s.trim())
+        .filter(Boolean);
+    }
+    const presenceGrace = this._body.querySelector(".pcs-presence-grace");
+    if (presenceGrace) {
+      this._settingsDraft.presence_grace = parseInt(presenceGrace.value, 10) || 10;
+    }
   }
 
   _wireSettings() {
@@ -553,6 +608,14 @@ class PrecisionClimateScheduleCard extends HTMLElement {
           }
         }
         this._settingsDraft.away_on = want;
+        this._render();
+      });
+    }
+    const presenceToggle = this._body.querySelector("[data-presence-toggle]");
+    if (presenceToggle) {
+      presenceToggle.addEventListener("click", () => {
+        this._syncSettingsFromDom();
+        this._settingsDraft.presence_enabled = !this._settingsDraft.presence_enabled;
         this._render();
       });
     }
@@ -804,6 +867,9 @@ const STYLE = `
   .pcs-away-field { flex-direction: row; align-items: center; justify-content: space-between; max-width: 280px; gap: 12px; }
   .pcs-away-field label { flex: 1; }
   .pcs-away-field input { max-width: 90px; }
+
+  /* Presence mode */
+  .pcs-presence-toggle { font-weight: 600; }
 
   /* Child lock */
   .pcs-childlock-field { flex-direction: row; align-items: center; justify-content: space-between; max-width: 300px; gap: 12px; }

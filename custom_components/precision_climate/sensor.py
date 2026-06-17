@@ -91,6 +91,12 @@ class SystemStatusSensor(PrecisionBaseEntity, SensorEntity):
             "settings": dict(c.config.settings),
             # Consumed by the visual schedule card to render/edit schedules.
             "schedules": c.schedule_payload(),
+            # Presence mode attributes.
+            "presence_enabled": c.config.presence.enabled,
+            "presence_zone": c.config.presence.zone,
+            "presence_persons": c.config.presence.persons,
+            "presence_grace_minutes": c.config.presence.grace_minutes,
+            "away_source": c._away_source,
         }
 
 

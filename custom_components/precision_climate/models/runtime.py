@@ -21,6 +21,10 @@ from ..const import (
     CONF_NOTIFICATIONS,
     CONF_NOTIFY_SERVICE,
     CONF_NOTIFY_SERVICES,
+    CONF_PRESENCE_ENABLED,
+    CONF_PRESENCE_GRACE_MINUTES,
+    CONF_PRESENCE_PERSONS,
+    CONF_PRESENCE_ZONE,
     CONF_ROOM_ID,
     CONF_ROOM_NAME,
     CONF_ROOMS,
@@ -37,6 +41,7 @@ from ..const import (
     CONF_TRVS,
     CONF_UPPER_HYSTERESIS,
     CONF_WINDOWS,
+    DEFAULT_PRESENCE_GRACE_MINUTES,
     DEFAULT_SUNNY_END_MIN,
     DEFAULT_SUNNY_TARGET,
 )
@@ -75,6 +80,16 @@ class SunnyDayConfig:
 
 
 @dataclass
+class PresenceConfig:
+    """Optional presence-based away mode configuration."""
+
+    enabled: bool = False
+    persons: list[str] = field(default_factory=list)
+    zone: str | None = None
+    grace_minutes: int = DEFAULT_PRESENCE_GRACE_MINUTES
+
+
+@dataclass
 class RuntimeConfig:
     """Everything the coordinator needs, parsed from the config entry."""
 
@@ -83,6 +98,7 @@ class RuntimeConfig:
     schedules: list[RoomSchedule]
     default_room: str | None
     sunny_day: SunnyDayConfig
+    presence: PresenceConfig = field(default_factory=PresenceConfig)
     notify_services: list[str] = field(default_factory=list)
     notifications: dict[str, bool] = field(default_factory=dict)
     # Global settings managed from the card's config panel (boost, away, ...).
@@ -170,13 +186,22 @@ def build_runtime(data: dict) -> RuntimeConfig:
     if legacy and legacy not in notify_services:
         notify_services.append(legacy)
 
+    settings = dict(data.get(CONF_SETTINGS, {}))
+    presence = PresenceConfig(
+        enabled=bool(settings.get(CONF_PRESENCE_ENABLED, False)),
+        persons=list(settings.get(CONF_PRESENCE_PERSONS, [])),
+        zone=settings.get(CONF_PRESENCE_ZONE) or None,
+        grace_minutes=int(settings.get(CONF_PRESENCE_GRACE_MINUTES, DEFAULT_PRESENCE_GRACE_MINUTES)),
+    )
+
     return RuntimeConfig(
         boiler_switch=data[CONF_BOILER_SWITCH],
         rooms=rooms,
         schedules=schedules,
         default_room=data.get(CONF_DEFAULT_ROOM),
         sunny_day=sunny,
+        presence=presence,
         notify_services=notify_services,
         notifications=dict(data.get(CONF_NOTIFICATIONS, {})),
-        settings=dict(data.get(CONF_SETTINGS, {})),
+        settings=settings,
     )

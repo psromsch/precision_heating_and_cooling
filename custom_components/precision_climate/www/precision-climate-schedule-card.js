@@ -30,7 +30,7 @@ const DAY_ORDER = ["all", "weekday", "weekend", "mon", "tue", "wed", "thu", "fri
 
 // Shown in the card footer so you can confirm which card version is live
 // after a HACS update (keep in sync with manifest.json).
-const CARD_VERSION = "0.8.0";
+const CARD_VERSION = "0.9.0";
 
 const pad = (n) => String(n).padStart(2, "0");
 const minToHHMM = (m) => {
@@ -245,6 +245,13 @@ class PrecisionClimateScheduleCard extends HTMLElement {
       });
     });
 
+    this._body.querySelectorAll("[data-room-away]").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const [rid, flag] = btn.getAttribute("data-room-away").split("|");
+        this._setRoomAway(rid, flag === "1");
+      });
+    });
+
     const masterBtn = this._body.querySelector("[data-master-toggle]");
     if (masterBtn) {
       masterBtn.addEventListener("click", () => {
@@ -394,6 +401,18 @@ class PrecisionClimateScheduleCard extends HTMLElement {
       });
     } catch (err) {
       this._error = (err && err.message) || "Could not cancel boost.";
+      this._render();
+    }
+  }
+
+  async _setRoomAway(roomId, away) {
+    try {
+      await this._hass.callService("precision_climate", "set_room_away", {
+        room_id: roomId,
+        away,
+      });
+    } catch (err) {
+      this._error = (err && err.message) || "Could not change room away state.";
       this._render();
     }
   }
@@ -727,6 +746,10 @@ class PrecisionClimateScheduleCard extends HTMLElement {
     const paused = !!info.paused;
     const pausedBadge = paused ? `<span class="pcs-paused-badge">paused</span>` : "";
     const pauseBtn = `<button class="pcs-btn pcs-pause-btn ${paused ? "pcs-resume" : ""}" data-pause="${room.room_id}|${paused ? "0" : "1"}" title="${paused ? "Resume room" : "Pause room (target 5°C until resumed)"}">${paused ? "▶ Resume" : "⏸ Pause"}</button>`;
+    const roomAway = !!info.room_away;
+    const awayTarget = info.away_target != null ? `${Number(info.away_target).toFixed(1)}°` : "";
+    const roomAwayBadge = roomAway ? `<span class="pcs-room-away-badge">🏠 away${awayTarget ? ` (${awayTarget})` : ""}</span>` : "";
+    const roomAwayBtn = `<button class="pcs-btn pcs-room-away-btn ${roomAway ? "pcs-room-away-active" : ""}" data-room-away="${room.room_id}|${roomAway ? "0" : "1"}" title="${roomAway ? "Disable away for this room" : "Enable away for this room (caps at away target)"}">${roomAway ? "🏠 Room away" : "🏠 Away"}</button>`;
 
     // Boost: manual TRV override active for a window. Show a badge + cancel
     // button, and overlay a band on each timeline from now until it expires.
@@ -785,10 +808,10 @@ class PrecisionClimateScheduleCard extends HTMLElement {
       })
       .join("");
 
-    return `<div class="pcs-room${paused ? " pcs-room-paused" : ""}${boosted ? " pcs-room-boosted" : ""}">
+    return `<div class="pcs-room${paused ? " pcs-room-paused" : ""}${boosted ? " pcs-room-boosted" : ""}${roomAway ? " pcs-room-away" : ""}">
       <div class="pcs-room-name">
-        <span class="pcs-room-name-text">${room.name}${heatIcon}${tempSpan}${pausedBadge}${boostBadge}</span>
-        <span class="pcs-room-actions">${boostBtn}${pauseBtn}</span>
+        <span class="pcs-room-name-text">${room.name}${heatIcon}${tempSpan}${pausedBadge}${boostBadge}${roomAwayBadge}</span>
+        <span class="pcs-room-actions">${boostBtn}${roomAwayBtn}${pauseBtn}</span>
       </div>
       ${days}
     </div>`;
@@ -966,6 +989,12 @@ const STYLE = `
   .pcs-pause-btn.pcs-resume { border-color: var(--warning-color, #d9a13b); color: var(--warning-color, #d9a13b); }
   .pcs-room-paused .pcs-timeline { opacity: .5; }
   .pcs-room-actions { display: flex; align-items: center; gap: 6px; }
+
+  /* Per-room away mode */
+  .pcs-room-away-badge { font-weight: 600; font-size: .72em; text-transform: uppercase; letter-spacing: .04em; padding: 1px 6px; border-radius: 8px; background: #2563eb; color: #fff; white-space: nowrap; }
+  .pcs-room-away-btn { white-space: nowrap; }
+  .pcs-room-away-active { border-color: #2563eb; color: #93c5fd; font-weight: 600; }
+  .pcs-room-away .pcs-timeline { opacity: .65; }
 
   /* Boost */
   .pcs-boost-badge { font-weight: 600; font-size: .72em; text-transform: uppercase; letter-spacing: .03em; padding: 1px 6px; border-radius: 8px; background: #8b5cf6; color: #fff; white-space: nowrap; }

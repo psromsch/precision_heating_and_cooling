@@ -67,3 +67,38 @@ occasionally wrong.
 **If revisited:** opt-in per room, off by default; show the learned slope and
 predicted start time on the card so the behaviour is transparent and auditable,
 never a black box.
+
+---
+
+## 3. Sunny-day logic (outdoor-temp heating suppression)
+
+**Idea:** When outdoor temperature exceeds a configurable threshold (e.g. 18 °C),
+disable or reduce heating globally, since solar gain will bring rooms to target
+naturally. Requires an outdoor temperature entity in the config.
+
+**Why parked:** Assumes solar gain will compensate for the heating gap — not
+guaranteed (overcast sunny day, north-facing rooms, insulation differences).
+Makes the system predictive instead of reactive. The user can already configure
+a lower away-mode temperature or pause rooms manually when it's warm outside.
+
+**If revisited:** global setting `sunny_threshold_c`; heating suppressed when
+an outdoor sensor exceeds it; clearly shown on the status card so the user
+understands why heating is off.
+
+---
+
+## 4. Per-room presence sensor (entity-based room occupancy)
+
+**Idea:** Allow selecting a presence sensor (binary, e.g. a mmWave radar) per
+room in the room config. When the room is unoccupied, apply the room's away
+temperature automatically (without affecting other rooms).
+
+**Why parked:** Requires a per-room binary_sensor entity selector in the room
+config flow UI, plus logic to distinguish per-room away from global away.
+Adds complexity to an already multi-layered away-mode system.
+
+**If revisited:** add `presence_entity` to room config; when its state is `off`,
+treat the room as individually away (capped to `away_target`); restore when
+state returns to `on`. No learning, fully reactive — fits the obedience
+philosophy. Lower priority than the global zone-based presence that's already
+implemented.

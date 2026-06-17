@@ -23,7 +23,7 @@
  * No build step, no external dependencies.
  */
 
-const HISTORY_CARD_VERSION = "0.8.0";
+const HISTORY_CARD_VERSION = "0.9.0";
 
 // Per-room line colours, assigned round-robin in discovery order.
 const ROOM_COLORS = [
@@ -249,8 +249,10 @@ class PrecisionClimateHistoryCard extends HTMLElement {
 
     // Target stepline (hold each value until the next sample).
     const targetPath = this._steplinePath(targetPts, xs, ys, now);
-    // Temperature smooth line.
-    const tempPath = this._linePath(tempPts, xs, ys);
+    // Temperature smooth line; extend to "now" unless the sensor is unavailable.
+    const lastTempRaw = this._lastRawState(info.thermometer_entity_id);
+    const tempAvailable = lastTempRaw !== null && lastTempRaw !== "unavailable" && lastTempRaw !== "unknown";
+    const tempPath = this._linePath(tempPts, xs, ys, tempAvailable ? now : null);
 
     // Hour gridlines every 6h.
     const grid = this._hourGrid(t0, now, xs, padT, innerH);
@@ -327,9 +329,24 @@ class PrecisionClimateHistoryCard extends HTMLElement {
 
   // --- geometry helpers ----------------------------------------------------
 
-  _linePath(pts, xs, ys) {
+  // Return the raw state string of the last point for an entity (may be
+  // "unavailable", "unknown", or a numeric string).
+  _lastRawState(entityId) {
+    const series = this._series(entityId);
+    if (!series.length) return null;
+    return String(series[series.length - 1].v).toLowerCase();
+  }
+
+  _linePath(pts, xs, ys, extendTo) {
     if (!pts.length) return "";
-    return pts.map((p, i) => `${i === 0 ? "M" : "L"}${xs(p.t).toFixed(1)},${ys(p.v).toFixed(1)}`).join(" ");
+    let d = pts.map((p, i) => `${i === 0 ? "M" : "L"}${xs(p.t).toFixed(1)},${ys(p.v).toFixed(1)}`).join(" ");
+    // Extend to the right edge with the last known value (caller passes extendTo
+    // only when the sensor is not currently unavailable/unknown).
+    if (extendTo != null) {
+      const last = pts[pts.length - 1];
+      d += ` L${xs(extendTo).toFixed(1)},${ys(last.v).toFixed(1)}`;
+    }
+    return d;
   }
 
   _steplinePath(pts, xs, ys, now) {

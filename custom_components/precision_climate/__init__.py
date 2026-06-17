@@ -164,6 +164,29 @@ def _async_register_services(hass: HomeAssistant) -> None:
         DOMAIN, SERVICE_SET_ROOM_PAUSE, _handle_set_room_pause, schema=pause_schema
     )
 
+    room_away_schema = vol.Schema(
+        {
+            vol.Required("room_id"): str,
+            vol.Required("away"): vol.Coerce(bool),
+        }
+    )
+
+    async def _handle_set_room_away(call: "ServiceCall") -> None:
+        room_id = call.data["room_id"]
+        away = call.data["away"]
+        for entry in hass.config_entries.async_entries(DOMAIN):
+            coordinator = hass.data.get(DOMAIN, {}).get(entry.entry_id)
+            if coordinator is None:
+                continue
+            if any(r.room_id == room_id for r in coordinator.config.rooms):
+                await coordinator.async_set_room_away(room_id, away)
+                return
+        raise vol.Invalid(f"No configured room '{room_id}' found")
+
+    hass.services.async_register(
+        DOMAIN, "set_room_away", _handle_set_room_away, schema=room_away_schema
+    )
+
     boost_schema = vol.Schema(
         {
             vol.Required("room_id"): str,

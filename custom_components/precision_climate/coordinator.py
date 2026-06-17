@@ -96,6 +96,9 @@ class PrecisionClimateCoordinator:
         # Per-room pause: paused rooms get their target dropped to PAUSE_TARGET
         # until resumed. Set is seeded by the per-room pause switches on restore.
         self._room_paused: set[str] = set()
+        # Per-room away: each room's target is capped at its away_target while it
+        # is in this set. Manual-only (no timer); independent from global away.
+        self._room_away: set[str] = set()
         # Per-room boost: a manual TRV change overrides the schedule target AND
         # active/passive flag for a configured number of hours. Maps room_id ->
         # {"target": float, "expires": datetime (UTC)}. Each has an expiry timer.
@@ -408,6 +411,13 @@ class PrecisionClimateCoordinator:
         # (min of schedule and away). Active/passive is left as scheduled.
         if self._away_on:
             for r in resolved:
+                away = self.config.away_target(r.room_id)
+                if away is not None:
+                    r.target = min(r.target, away)
+        # Per-room away: cap at the room's configured away target (independent of
+        # global away). Applied before pause so pause always wins over away.
+        for r in resolved:
+            if r.room_id in self._room_away:
                 away = self.config.away_target(r.room_id)
                 if away is not None:
                     r.target = min(r.target, away)
@@ -804,6 +814,16 @@ class PrecisionClimateCoordinator:
             self._room_paused.add(room_id)
         else:
             self._room_paused.discard(room_id)
+        await self.async_evaluate()
+
+    def room_away(self, room_id: str) -> bool:
+        return room_id in self._room_away
+
+    async def async_set_room_away(self, room_id: str, on: bool) -> None:
+        if on:
+            self._room_away.add(room_id)
+        else:
+            self._room_away.discard(room_id)
         await self.async_evaluate()
 
     # --- Child lock ----------------------------------------------------------

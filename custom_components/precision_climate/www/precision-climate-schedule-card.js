@@ -30,7 +30,7 @@ const DAY_ORDER = ["all", "weekday", "weekend", "mon", "tue", "wed", "thu", "fri
 
 // Shown in the card footer so you can confirm which card version is live
 // after a HACS update (keep in sync with manifest.json).
-const CARD_VERSION = "0.3.1";
+const CARD_VERSION = "0.4.0";
 
 const pad = (n) => String(n).padStart(2, "0");
 const minToHHMM = (m) => {
@@ -212,11 +212,12 @@ class PrecisionClimateScheduleCard extends HTMLElement {
     const boilerOn = statusState ? !!statusState.attributes.boiler_on : false;
     const masterOn = statusState ? statusState.attributes.master_on !== false : true;
     const masterEntityId = statusState ? (statusState.attributes.master_switch_entity_id || null) : null;
+    const awayOn = statusState ? statusState.attributes.away_on === true : false;
     const reason = statusState ? (statusState.state || "") : "";
     const roomsInfo = this._roomsInfo();
 
     this._body.innerHTML =
-      this._renderBoilerStatus(boilerOn, masterOn, masterEntityId, reason) +
+      this._renderBoilerStatus(boilerOn, masterOn, masterEntityId, reason, awayOn) +
       (this._confirmMaster ? this._renderMasterConfirm() : "") +
       `<div class="${masterOn ? "" : "pcs-master-off"}">` +
       schedules.map((room) => this._renderRoom(room, roomsInfo)).join("") +
@@ -289,9 +290,19 @@ class PrecisionClimateScheduleCard extends HTMLElement {
     // Take a working copy so edits aren't lost to live HA state updates and can
     // be cancelled. Only the keys the panel manages are seeded here.
     const s = this._settings();
+    const status = this._statusState();
+    const awayTargets = s.away_targets || {};
+    const schedules = this._schedules();
     this._settingsDraft = {
       boost_duration_hours: Number(s.boost_duration_hours ?? 1),
+      away_on: status ? status.attributes.away_on === true : false,
+      away_switch_entity_id: status ? status.attributes.away_switch_entity_id || null : null,
+      rooms: schedules.map((r) => ({ room_id: r.room_id, name: r.name })),
+      away_targets: {},
     };
+    schedules.forEach((r) => {
+      this._settingsDraft.away_targets[r.room_id] = Number(awayTargets[r.room_id] ?? 16);
+    });
     this._settingsTab = "boost";
     this._settingsOpen = true;
     this._error = null;
@@ -309,6 +320,7 @@ class PrecisionClimateScheduleCard extends HTMLElement {
     const draft = this._settingsDraft || {};
     const patch = {
       boost_duration_hours: Number(draft.boost_duration_hours) || 1,
+      away_targets: draft.away_targets || {},
     };
     try {
       await this._hass.callService("precision_climate", "set_settings", {
@@ -347,11 +359,12 @@ class PrecisionClimateScheduleCard extends HTMLElement {
     }
   }
 
-  _renderBoilerStatus(boilerOn, masterOn, masterEntityId, reason) {
+  _renderBoilerStatus(boilerOn, masterOn, masterEntityId, reason, awayOn) {
     const icon = boilerOn ? "🔥" : "⚪";
     const label = boilerOn ? "Boiler ON" : "Boiler OFF";
     const cls = boilerOn ? "pcs-boiler-on" : "pcs-boiler-off";
     const reasonHtml = reason ? ` <span class="pcs-reason">— ${reason}</span>` : "";
+    const awayHtml = awayOn ? ` <span class="pcs-away-badge">🏠 AWAY</span>` : "";
 
     let masterBtn = "";
     if (masterEntityId) {
@@ -369,7 +382,7 @@ class PrecisionClimateScheduleCard extends HTMLElement {
     const gearBtn = `<button class="pcs-btn pcs-gear-btn" data-open-settings title="Global configuration">⚙</button>`;
 
     return `<div class="pcs-boiler ${cls}${masterOn ? "" : " pcs-boiler-master-off"}">
-      <span>${icon} <strong>${label}</strong>${reasonHtml}</span>
+      <span>${icon} <strong>${label}</strong>${reasonHtml}${awayHtml}</span>
       <span class="pcs-boiler-actions">${masterBtn}${gearBtn}</span>
     </div>`;
   }
@@ -433,6 +446,29 @@ class PrecisionClimateScheduleCard extends HTMLElement {
           return to its schedule. Re-touching the TRV restarts the timer.
         </div>`;
     }
+    if (this._settingsTab === "away") {
+      const toggle = `<button class="pcs-btn pcs-away-toggle ${d.away_on ? "pcs-primary" : ""}" data-away-toggle>
+        ${d.away_on ? "🏠 Away mode: ON" : "Away mode: OFF"}</button>`;
+      const rows = (d.rooms || [])
+        .map(
+          (r) => `
+        <div class="pcs-field pcs-away-field">
+          <label>${r.name}</label>
+          <input class="pcs-in pcs-away-target" data-room="${r.room_id}" type="number"
+            min="5" max="25" step="0.1" value="${Number((d.away_targets || {})[r.room_id] ?? 16)}">
+        </div>`
+        )
+        .join("");
+      return `
+        <div class="pcs-away-toggle-row">${toggle}</div>
+        <div class="pcs-hint">
+          While Away mode is on, each room's target is capped at the value below
+          (the lower of schedule and away is used, so a cooler schedule still
+          wins). Active/passive periods stay exactly as scheduled. The toggle
+          takes effect immediately; the per-room targets are saved with Save.
+        </div>
+        ${rows}`;
+    }
     return `<div class="pcs-coming-soon">This section is coming soon.</div>`;
   }
 
@@ -441,6 +477,9 @@ class PrecisionClimateScheduleCard extends HTMLElement {
     if (hours) {
       this._settingsDraft.boost_duration_hours = parseFloat(hours.value);
     }
+    this._body.querySelectorAll(".pcs-away-target").forEach((inp) => {
+      this._settingsDraft.away_targets[inp.getAttribute("data-room")] = parseFloat(inp.value);
+    });
   }
 
   _wireSettings() {
@@ -451,6 +490,25 @@ class PrecisionClimateScheduleCard extends HTMLElement {
         this._render();
       });
     });
+    const awayToggle = this._body.querySelector("[data-away-toggle]");
+    if (awayToggle) {
+      awayToggle.addEventListener("click", async () => {
+        this._syncSettingsFromDom();
+        const eid = this._settingsDraft.away_switch_entity_id;
+        const want = !this._settingsDraft.away_on;
+        if (eid) {
+          try {
+            await this._hass.callService("switch", want ? "turn_on" : "turn_off", {
+              entity_id: eid,
+            });
+          } catch (err) {
+            this._error = (err && err.message) || "Could not toggle away mode.";
+          }
+        }
+        this._settingsDraft.away_on = want;
+        this._render();
+      });
+    }
     this._body
       .querySelector(".pcs-settings-cancel")
       .addEventListener("click", () => this._closeSettings());
@@ -674,6 +732,14 @@ const STYLE = `
   .pcs-field { display: flex; flex-direction: column; gap: 4px; margin-bottom: 8px; max-width: 220px; }
   .pcs-field label { font-size: .85em; opacity: .8; }
   .pcs-coming-soon { opacity: .55; font-style: italic; padding: 16px 0; }
+
+  /* Away mode */
+  .pcs-away-badge { font-weight: 700; font-size: .72em; letter-spacing: .04em; padding: 1px 6px; border-radius: 8px; background: #2563eb; color: #fff; white-space: nowrap; }
+  .pcs-away-toggle-row { margin-bottom: 8px; }
+  .pcs-away-toggle { font-weight: 600; }
+  .pcs-away-field { flex-direction: row; align-items: center; justify-content: space-between; max-width: 280px; gap: 12px; }
+  .pcs-away-field label { flex: 1; }
+  .pcs-away-field input { max-width: 90px; }
 
   /* Room header */
   .pcs-room { margin-bottom: 18px; }

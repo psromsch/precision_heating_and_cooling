@@ -68,6 +68,7 @@ class SystemStatusSensor(PrecisionBaseEntity, SensorEntity):
                 "boosted": boost is not None,
                 "boost_target": boost["target"] if boost else None,
                 "boost_expires": boost["expires"].isoformat() if boost else None,
+                "away_target": c.config.away_target(rid),
                 # Source entity_ids so the history card can plot recorded data
                 # without any per-room dashboard configuration.
                 "thermometer_entity_id": room.thermometer,
@@ -79,6 +80,8 @@ class SystemStatusSensor(PrecisionBaseEntity, SensorEntity):
             "master_on": c.master_on,
             "master_switch_entity_id": own_entity("master", "switch"),
             "boiler_switch_entity_id": c.config.boiler_switch,
+            "away_on": c.away_on,
+            "away_switch_entity_id": own_entity("away", "switch"),
             "paused": c.paused,
             "rooms": rooms,
             # Global settings managed from the card's config panel.

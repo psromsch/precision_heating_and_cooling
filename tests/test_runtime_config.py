@@ -108,6 +108,22 @@ def test_settings_boost_duration_override():
     assert rt.boost_duration_hours == 2.5
 
 
+def test_away_target_lookup():
+    data = sample_data()
+    data["settings"] = {"away_targets": {"living": 15.5}}
+    rt = build_runtime(data)
+    assert rt.away_target("living") == 15.5
+    # Unconfigured room -> None (no away override for it).
+    assert rt.away_target("bedroom") is None
+
+
+def test_away_target_invalid_value_is_none():
+    data = sample_data()
+    data["settings"] = {"away_targets": {"living": "not-a-number"}}
+    rt = build_runtime(data)
+    assert rt.away_target("living") is None
+
+
 def test_defaults_applied_when_optional_fields_missing():
     data = {
         "boiler_switch": "switch.b",

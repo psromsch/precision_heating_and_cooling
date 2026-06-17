@@ -91,6 +91,18 @@ class RuntimeConfig:
             self.settings.get(CONF_BOOST_DURATION_HOURS, DEFAULT_BOOST_DURATION_HOURS)
         )
 
+    def away_target(self, room_id: str) -> float | None:
+        """The away-mode target for a room, or None if not configured."""
+        from ..const import CONF_AWAY_TARGETS
+
+        raw = self.settings.get(CONF_AWAY_TARGETS, {}).get(room_id)
+        if raw is None:
+            return None
+        try:
+            return float(raw)
+        except (ValueError, TypeError):
+            return None
+
 
 def _parse_blocks(raw_blocks: dict) -> dict[str, list[ScheduleBlock]]:
     parsed: dict[str, list[ScheduleBlock]] = {}

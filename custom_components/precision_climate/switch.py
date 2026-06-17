@@ -17,7 +17,10 @@ async def async_setup_entry(
     hass: HomeAssistant, entry: ConfigEntry, async_add_entities: AddEntitiesCallback
 ) -> None:
     coordinator = hass.data[DOMAIN][entry.entry_id]
-    entities: list = [MasterSwitch(coordinator, entry.entry_id)]
+    entities: list = [
+        MasterSwitch(coordinator, entry.entry_id),
+        AwayModeSwitch(coordinator, entry.entry_id),
+    ]
     entities += [
         RoomPauseSwitch(coordinator, entry.entry_id, room)
         for room in coordinator.config.rooms
@@ -44,6 +47,35 @@ class MasterSwitch(PrecisionBaseEntity, SwitchEntity):
 
     async def async_turn_off(self, **kwargs) -> None:
         await self._coordinator.async_set_master(False)
+
+
+class AwayModeSwitch(PrecisionBaseEntity, SwitchEntity, RestoreEntity):
+    """Away mode: while on, every room's target is capped at its configured
+    away target. State is restored across restarts/reloads, and the switch can
+    be driven by presence automations."""
+
+    _attr_name = "Away Mode"
+    _attr_icon = "mdi:home-export-outline"
+
+    def __init__(self, coordinator, entry_id: str) -> None:
+        super().__init__(coordinator, entry_id)
+        self._attr_unique_id = f"{entry_id}_away"
+
+    async def async_added_to_hass(self) -> None:
+        await super().async_added_to_hass()
+        last = await self.async_get_last_state()
+        if last is not None and last.state == STATE_ON:
+            await self._coordinator.async_set_away(True)
+
+    @property
+    def is_on(self) -> bool:
+        return self._coordinator.away_on
+
+    async def async_turn_on(self, **kwargs) -> None:
+        await self._coordinator.async_set_away(True)
+
+    async def async_turn_off(self, **kwargs) -> None:
+        await self._coordinator.async_set_away(False)
 
 
 class RoomPauseSwitch(PrecisionBaseEntity, SwitchEntity, RestoreEntity):

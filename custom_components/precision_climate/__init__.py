@@ -56,7 +56,7 @@ def _async_cleanup_orphan_entities(hass, entry, coordinator) -> None:
     from homeassistant.helpers import entity_registry as er
 
     entry_id = entry.entry_id
-    valid = {f"{entry_id}_master", f"{entry_id}_status"}
+    valid = {f"{entry_id}_master", f"{entry_id}_away", f"{entry_id}_status"}
     for room in coordinator.config.rooms:
         valid.add(f"{entry_id}_{room.room_id}_target")
         valid.add(f"{entry_id}_{room.room_id}_heating")

@@ -58,9 +58,11 @@ CONF_SETTINGS = "settings"  # global settings managed from the card's config pan
 
 # Global settings keys (inside the CONF_SETTINGS dict)
 CONF_BOOST_DURATION_HOURS = "boost_duration_hours"
+CONF_AWAY_TARGETS = "away_targets"  # dict[room_id, target °C] used in away mode
 
 # Defaults for global settings
 DEFAULT_BOOST_DURATION_HOURS = 1.0
+DEFAULT_AWAY_TARGET = 16.0
 
 # Per-room
 CONF_ROOM_ID = "room_id"

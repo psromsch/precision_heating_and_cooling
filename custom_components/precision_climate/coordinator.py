@@ -80,6 +80,11 @@ class PrecisionClimateCoordinator:
         # User-facing master controls (mutated by the master switch / pause entities).
         self.master_on: bool = True
         self.paused: bool = False
+        # Away mode: while on, each room's target is capped at its configured
+        # away target (min of schedule and away). Active/passive is untouched.
+        # Driven by the away switch entity (restored across restarts) and, later,
+        # by presence automations.
+        self._away_on: bool = False
         # Per-room pause: paused rooms get their target dropped to PAUSE_TARGET
         # until resumed. Set is seeded by the per-room pause switches on restore.
         self._room_paused: set[str] = set()
@@ -340,6 +345,13 @@ class PrecisionClimateCoordinator:
             self.config.schedules, weekday, minute, self.config.default_room
         )
         resolved_by_id = {r.room_id: r for r in resolved}
+        # Away mode caps each room's target at its configured away target
+        # (min of schedule and away). Active/passive is left as scheduled.
+        if self._away_on:
+            for r in resolved:
+                away = self.config.away_target(r.room_id)
+                if away is not None:
+                    r.target = min(r.target, away)
         # Paused rooms have their effective target dropped so they stop calling
         # for heat. The stored schedule is untouched, so resume restores it.
         for r in resolved:
@@ -514,6 +526,14 @@ class PrecisionClimateCoordinator:
 
     async def async_set_paused(self, paused: bool) -> None:
         self.paused = paused
+        await self.async_evaluate()
+
+    @property
+    def away_on(self) -> bool:
+        return self._away_on
+
+    async def async_set_away(self, on: bool) -> None:
+        self._away_on = on
         await self.async_evaluate()
 
     def room_paused(self, room_id: str) -> bool:

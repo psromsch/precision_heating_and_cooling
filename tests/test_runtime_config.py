@@ -124,6 +124,25 @@ def test_away_target_invalid_value_is_none():
     assert rt.away_target("living") is None
 
 
+def test_child_locks_parsed_and_entities_helper():
+    data = sample_data()
+    data["rooms"][0]["child_locks"] = {
+        "climate.living_trv1": "switch.living_trv1_child_lock",
+    }
+    rt = build_runtime(data)
+    room = rt.rooms[0]
+    assert room.child_locks == {"climate.living_trv1": "switch.living_trv1_child_lock"}
+    # Only TRVs with a configured lock are returned, in TRV order.
+    assert room.child_lock_entities == ["switch.living_trv1_child_lock"]
+
+
+def test_child_locks_default_empty():
+    rt = build_runtime(sample_data())
+    room = rt.rooms[0]
+    assert room.child_locks == {}
+    assert room.child_lock_entities == []
+
+
 def test_defaults_applied_when_optional_fields_missing():
     data = {
         "boiler_switch": "switch.b",

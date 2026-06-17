@@ -68,6 +68,9 @@ DEFAULT_AWAY_TARGET = 16.0
 CONF_ROOM_ID = "room_id"
 CONF_ROOM_NAME = "name"
 CONF_TRVS = "trvs"
+# Optional per-TRV child-lock entity (switch/lock). Stored as a dict mapping
+# the TRV's climate entity_id -> its child-lock entity_id.
+CONF_CHILD_LOCKS = "child_locks"
 CONF_THERMOMETER = "thermometer"
 CONF_WINDOWS = "windows"
 CONF_LOWER_HYSTERESIS = "lower_hysteresis"

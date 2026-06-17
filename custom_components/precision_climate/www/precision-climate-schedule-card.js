@@ -30,7 +30,7 @@ const DAY_ORDER = ["all", "weekday", "weekend", "mon", "tue", "wed", "thu", "fri
 
 // Shown in the card footer so you can confirm which card version is live
 // after a HACS update (keep in sync with manifest.json).
-const CARD_VERSION = "0.4.0";
+const CARD_VERSION = "0.5.0";
 
 const pad = (n) => String(n).padStart(2, "0");
 const minToHHMM = (m) => {
@@ -293,20 +293,39 @@ class PrecisionClimateScheduleCard extends HTMLElement {
     const status = this._statusState();
     const awayTargets = s.away_targets || {};
     const schedules = this._schedules();
+    const roomsInfo = status ? status.attributes.rooms || {} : {};
     this._settingsDraft = {
       boost_duration_hours: Number(s.boost_duration_hours ?? 1),
       away_on: status ? status.attributes.away_on === true : false,
       away_switch_entity_id: status ? status.attributes.away_switch_entity_id || null : null,
       rooms: schedules.map((r) => ({ room_id: r.room_id, name: r.name })),
       away_targets: {},
+      // Per-room child-lock entities + optimistic on-state (read from live state).
+      child_lock_entities: {},
+      child_lock_on: {},
     };
     schedules.forEach((r) => {
       this._settingsDraft.away_targets[r.room_id] = Number(awayTargets[r.room_id] ?? 16);
+      const entities = (roomsInfo[r.name] || {}).child_lock_entities || [];
+      this._settingsDraft.child_lock_entities[r.room_id] = entities;
+      this._settingsDraft.child_lock_on[r.room_id] = this._childLockOn(entities);
     });
     this._settingsTab = "boost";
     this._settingsOpen = true;
     this._error = null;
     this._render();
+  }
+
+  _childLockOn(entities) {
+    // A room's child lock is "on" only if every configured lock entity reports
+    // an engaged state (on / locked). Empty config -> off.
+    if (!entities || !entities.length) return false;
+    return entities.every((eid) => {
+      const st = this._hass.states[eid];
+      if (!st) return false;
+      const v = String(st.state).toLowerCase();
+      return v === "on" || v === "locked";
+    });
   }
 
   _closeSettings() {
@@ -405,6 +424,7 @@ class PrecisionClimateScheduleCard extends HTMLElement {
     const tabs = [
       { id: "boost", label: "Boost" },
       { id: "away", label: "Away Mode" },
+      { id: "childlock", label: "Child Lock" },
       { id: "presence", label: "Presence" },
       { id: "sunny", label: "Sunny Day" },
     ];
@@ -469,6 +489,33 @@ class PrecisionClimateScheduleCard extends HTMLElement {
         </div>
         ${rows}`;
     }
+    if (this._settingsTab === "childlock") {
+      const rows = (d.rooms || [])
+        .map((r) => {
+          const entities = (d.child_lock_entities || {})[r.room_id] || [];
+          if (!entities.length) {
+            return `<div class="pcs-field pcs-childlock-field">
+              <label>${r.name}</label>
+              <span class="pcs-childlock-none">no child-lock entity configured</span>
+            </div>`;
+          }
+          const on = !!(d.child_lock_on || {})[r.room_id];
+          return `<div class="pcs-field pcs-childlock-field">
+            <label>${r.name}</label>
+            <button class="pcs-btn pcs-childlock-toggle ${on ? "pcs-primary" : ""}"
+              data-childlock="${r.room_id}" data-want="${on ? "0" : "1"}">
+              ${on ? "🔒 Locked" : "🔓 Unlocked"}</button>
+          </div>`;
+        })
+        .join("");
+      return `
+        <div class="pcs-hint">
+          Engage or release the child lock on each room's TRVs. Configure which
+          entity is a TRV's child lock when you add or edit a room (Configure →
+          the room form). Changes take effect immediately.
+        </div>
+        ${rows}`;
+    }
     return `<div class="pcs-coming-soon">This section is coming soon.</div>`;
   }
 
@@ -509,6 +556,23 @@ class PrecisionClimateScheduleCard extends HTMLElement {
         this._render();
       });
     }
+    this._body.querySelectorAll("[data-childlock]").forEach((btn) => {
+      btn.addEventListener("click", async () => {
+        const roomId = btn.getAttribute("data-childlock");
+        const want = btn.getAttribute("data-want") === "1";
+        try {
+          await this._hass.callService("precision_climate", "set_room_child_lock", {
+            room_id: roomId,
+            on: want,
+          });
+          // Optimistic: live state may lag the command; reflect intent now.
+          this._settingsDraft.child_lock_on[roomId] = want;
+        } catch (err) {
+          this._error = (err && err.message) || "Could not change child lock.";
+        }
+        this._render();
+      });
+    });
     this._body
       .querySelector(".pcs-settings-cancel")
       .addEventListener("click", () => this._closeSettings());
@@ -740,6 +804,12 @@ const STYLE = `
   .pcs-away-field { flex-direction: row; align-items: center; justify-content: space-between; max-width: 280px; gap: 12px; }
   .pcs-away-field label { flex: 1; }
   .pcs-away-field input { max-width: 90px; }
+
+  /* Child lock */
+  .pcs-childlock-field { flex-direction: row; align-items: center; justify-content: space-between; max-width: 300px; gap: 12px; }
+  .pcs-childlock-field label { flex: 1; }
+  .pcs-childlock-toggle { font-weight: 600; white-space: nowrap; }
+  .pcs-childlock-none { opacity: .5; font-style: italic; font-size: .85em; }
 
   /* Room header */
   .pcs-room { margin-bottom: 18px; }

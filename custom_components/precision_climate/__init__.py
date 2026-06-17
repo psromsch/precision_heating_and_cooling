@@ -18,6 +18,7 @@ PLATFORMS: list[str] = ["switch", "binary_sensor", "sensor"]
 SERVICE_SET_SCHEDULE = "set_schedule"
 SERVICE_SET_ROOM_PAUSE = "set_room_pause"
 SERVICE_SET_ROOM_BOOST = "set_room_boost"
+SERVICE_SET_ROOM_CHILD_LOCK = "set_room_child_lock"
 SERVICE_SET_SETTINGS = "set_settings"
 # Frontend modules served and auto-loaded by the integration.
 CARD_FILENAMES = [
@@ -182,6 +183,30 @@ def _async_register_services(hass: HomeAssistant) -> None:
 
     hass.services.async_register(
         DOMAIN, SERVICE_SET_ROOM_BOOST, _handle_set_room_boost, schema=boost_schema
+    )
+
+    child_lock_schema = vol.Schema(
+        {
+            vol.Required("room_id"): str,
+            vol.Required("on"): vol.Coerce(bool),
+        }
+    )
+
+    async def _handle_set_room_child_lock(call: "ServiceCall") -> None:
+        room_id = call.data["room_id"]
+        on = call.data["on"]
+        for entry in hass.config_entries.async_entries(DOMAIN):
+            coordinator = hass.data.get(DOMAIN, {}).get(entry.entry_id)
+            if coordinator is None:
+                continue
+            if any(r.room_id == room_id for r in coordinator.config.rooms):
+                await coordinator.async_set_room_child_lock(room_id, on)
+                return
+        raise vol.Invalid(f"No configured room '{room_id}' found")
+
+    hass.services.async_register(
+        DOMAIN, SERVICE_SET_ROOM_CHILD_LOCK, _handle_set_room_child_lock,
+        schema=child_lock_schema,
     )
 
     settings_schema = vol.Schema(

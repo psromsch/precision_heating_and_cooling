@@ -56,6 +56,10 @@
         "title": "Room created",
         "description": "Room \"{name}\" was created with a default schedule (18 °C, active all day). To set its real schedule, open the Precision Climate Schedule card on your dashboard and edit it there."
       },
+      "trv_locks": {
+        "title": "TRV child locks",
+        "description": "Optionally pick a child-lock entity (a switch or lock) for each TRV in \"{name}\". You can then engage or release these locks per room from the schedule card's configuration panel. Leave a field empty if a TRV has no child lock."
+      },
       "manage_rooms": {
         "title": "Manage rooms",
         "description": "Pick a room and an action. Edit reopens the room form pre-filled (the schedule is edited via the dashboard card); delete removes it.",

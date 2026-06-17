@@ -27,6 +27,7 @@ from .const import (
     CONF_BLOCK_START,
     CONF_BLOCK_TARGET,
     CONF_BOILER_SWITCH,
+    CONF_CHILD_LOCKS,
     CONF_DEFAULT_ROOM,
     CONF_LOWER_HYSTERESIS,
     CONF_NOTIFICATIONS,
@@ -210,6 +211,7 @@ class PrecisionClimateOptionsFlow(config_entries.OptionsFlow):
     """
 
     _loaded = False
+    _is_new = False
 
     def _ensure_loaded(self) -> None:
         if self._loaded:
@@ -294,16 +296,22 @@ class PrecisionClimateOptionsFlow(config_entries.OptionsFlow):
                     for key in _DAY_KEYS_FOR_MODE[mode]
                 }
                 is_new = self._editing_id is None
+                trvs = user_input[CONF_TRVS]
+                # Preserve any previously-configured child-lock mappings for
+                # TRVs that are still on the room; drop those for removed TRVs.
+                prev_locks = prev.get(CONF_CHILD_LOCKS, {})
+                child_locks = {t: prev_locks[t] for t in trvs if t in prev_locks}
                 self._current_room = {
                     CONF_ROOM_ID: room_id,
                     CONF_ROOM_NAME: name,
-                    CONF_TRVS: user_input[CONF_TRVS],
+                    CONF_TRVS: trvs,
                     CONF_THERMOMETER: user_input[CONF_THERMOMETER],
                     CONF_WINDOWS: user_input.get(CONF_WINDOWS, []),
                     CONF_LOWER_HYSTERESIS: lower,
                     CONF_UPPER_HYSTERESIS: upper,
                     CONF_SCHEDULE_MODE: user_input[CONF_SCHEDULE_MODE],
                     CONF_SCHEDULE_BLOCKS: blocks_by_day,
+                    CONF_CHILD_LOCKS: child_locks,
                 }
                 # Replace if editing, else append.
                 self._rooms = [
@@ -312,6 +320,11 @@ class PrecisionClimateOptionsFlow(config_entries.OptionsFlow):
                 self._rooms.append(self._current_room)
                 if self._default_room is None:
                     self._default_room = room_id
+                self._is_new = is_new
+                # If the room has TRVs, ask for an optional child-lock entity
+                # per TRV before finishing.
+                if trvs:
+                    return await self.async_step_trv_locks()
                 if is_new:
                     return await self.async_step_room_created()
                 return self._save()
@@ -331,6 +344,45 @@ class PrecisionClimateOptionsFlow(config_entries.OptionsFlow):
             step_id="room_created",
             data_schema=vol.Schema({}),
             description_placeholders={"name": self._current_room[CONF_ROOM_NAME]},
+        )
+
+    async def async_step_trv_locks(self, user_input: dict | None = None):
+        """Optional per-TRV child-lock entity selection for the current room.
+
+        One optional entity field per TRV (the field key is the TRV entity_id so
+        the user can tell which valve it belongs to). Leaving a field empty means
+        that TRV has no child-lock entity.
+        """
+        assert self._current_room is not None
+        room = self._current_room
+        trvs = room[CONF_TRVS]
+        existing = room.get(CONF_CHILD_LOCKS, {})
+
+        if user_input is not None:
+            locks = {}
+            for trv in trvs:
+                val = user_input.get(trv)
+                if val:
+                    locks[trv] = val
+            room[CONF_CHILD_LOCKS] = locks
+            # The room is already in self._rooms (same object reference).
+            if self._is_new:
+                return await self.async_step_room_created()
+            return self._save()
+
+        schema_dict: dict = {}
+        for trv in trvs:
+            prior = existing.get(trv)
+            key = (
+                vol.Optional(trv, default=prior)
+                if prior
+                else vol.Optional(trv)
+            )
+            schema_dict[key] = _entity_picker(["switch", "lock"])
+        return self.async_show_form(
+            step_id="trv_locks",
+            data_schema=vol.Schema(schema_dict),
+            description_placeholders={"name": room[CONF_ROOM_NAME]},
         )
 
     # --- Manage existing rooms ----------------------------------------------

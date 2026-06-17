@@ -546,6 +546,28 @@ class PrecisionClimateCoordinator:
             self._room_paused.discard(room_id)
         await self.async_evaluate()
 
+    # --- Child lock ----------------------------------------------------------
+
+    async def async_set_room_child_lock(self, room_id: str, on: bool) -> None:
+        """Turn the child lock on/off for every TRV in a room.
+
+        Child-lock entities are user-selected per TRV and may be ``switch`` or
+        ``lock`` entities; we dispatch the right service for each domain.
+        """
+        room = self.config.room_by_id(room_id)
+        if room is None:
+            return
+        for entity_id in room.child_lock_entities:
+            domain = entity_id.split(".", 1)[0]
+            if domain == "lock":
+                service = "lock" if on else "unlock"
+            else:  # switch (and any toggleable fallback)
+                service = "turn_on" if on else "turn_off"
+            await self.hass.services.async_call(
+                domain, service, {ATTR_ENTITY_ID: entity_id}, blocking=False
+            )
+        self._notify_listeners()
+
     # --- Boost ---------------------------------------------------------------
 
     def room_boost(self, room_id: str) -> dict | None:

@@ -15,6 +15,7 @@ from ..const import (
     CONF_BLOCK_START,
     CONF_BLOCK_TARGET,
     CONF_BOILER_SWITCH,
+    CONF_CHILD_LOCKS,
     CONF_DEFAULT_ROOM,
     CONF_LOWER_HYSTERESIS,
     CONF_NOTIFICATIONS,
@@ -53,6 +54,13 @@ class RoomConfig:
     windows: list[str] = field(default_factory=list)
     lower_hysteresis: float = 0.5
     upper_hysteresis: float = 0.5
+    # Optional child-lock entity per TRV: {trv_entity_id: child_lock_entity_id}.
+    child_locks: dict[str, str] = field(default_factory=dict)
+
+    @property
+    def child_lock_entities(self) -> list[str]:
+        """The configured child-lock entity_ids for this room's TRVs."""
+        return [self.child_locks[t] for t in self.trvs if self.child_locks.get(t)]
 
 
 @dataclass
@@ -135,6 +143,7 @@ def build_runtime(data: dict) -> RuntimeConfig:
                 windows=list(raw.get(CONF_WINDOWS, [])),
                 lower_hysteresis=float(raw.get(CONF_LOWER_HYSTERESIS, 0.5)),
                 upper_hysteresis=float(raw.get(CONF_UPPER_HYSTERESIS, 0.5)),
+                child_locks=dict(raw.get(CONF_CHILD_LOCKS, {})),
             )
         )
         schedules.append(

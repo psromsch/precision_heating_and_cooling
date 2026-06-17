@@ -90,6 +90,28 @@ set_room_boost:
       selector:
         boolean:
 
+set_room_child_lock:
+  name: Set a room's TRV child lock
+  description: >
+    Turn the child lock on or off for every TRV in a room that has a child-lock
+    entity configured. switch entities are toggled on/off; lock entities are
+    locked/unlocked. Used by the schedule card's configuration panel.
+  fields:
+    room_id:
+      name: Room ID
+      description: The room's id (slug), e.g. living.
+      required: true
+      example: living
+      selector:
+        text:
+    on:
+      name: On
+      description: true to engage the child lock, false to release it.
+      required: true
+      example: true
+      selector:
+        boolean:
+
 set_settings:
   name: Update global settings
   description: >

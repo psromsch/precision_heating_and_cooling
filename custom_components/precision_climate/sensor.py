@@ -74,6 +74,9 @@ class SystemStatusSensor(PrecisionBaseEntity, SensorEntity):
                 "thermometer_entity_id": room.thermometer,
                 "target_entity_id": own_entity(f"{rid}_target", "sensor"),
                 "heating_entity_id": own_entity(f"{rid}_heating", "binary_sensor"),
+                # User-selected child-lock entities (switch/lock) per TRV, so the
+                # card can show a per-room toggle reflecting their live state.
+                "child_lock_entities": room.child_lock_entities,
             }
         return {
             "boiler_on": c.boiler_on,

@@ -30,7 +30,7 @@ const DAY_ORDER = ["all", "weekday", "weekend", "mon", "tue", "wed", "thu", "fri
 
 // Shown in the card footer so you can confirm which card version is live
 // after a HACS update (keep in sync with manifest.json).
-const CARD_VERSION = "0.9.0";
+const CARD_VERSION = "0.9.3";
 
 const pad = (n) => String(n).padStart(2, "0");
 const minToHHMM = (m) => {
@@ -220,7 +220,7 @@ class PrecisionClimateScheduleCard extends HTMLElement {
       this._renderBoilerStatus(boilerOn, masterOn, masterEntityId, reason, awayOn) +
       (this._confirmMaster ? this._renderMasterConfirm() : "") +
       `<div class="${masterOn ? "" : "pcs-master-off"}">` +
-      schedules.map((room) => this._renderRoom(room, roomsInfo)).join("") +
+      schedules.map((room, i) => this._renderRoom(room, roomsInfo, i, schedules.length)).join("") +
       `</div>` +
       `<div class="pcs-version">card v${CARD_VERSION}</div>`;
 
@@ -249,6 +249,13 @@ class PrecisionClimateScheduleCard extends HTMLElement {
       btn.addEventListener("click", () => {
         const [rid, flag] = btn.getAttribute("data-room-away").split("|");
         this._setRoomAway(rid, flag === "1");
+      });
+    });
+
+    this._body.querySelectorAll("[data-move]").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const [rid, dir] = btn.getAttribute("data-move").split("|");
+        this._moveRoom(rid, dir === "up" ? -1 : 1);
       });
     });
 
@@ -413,6 +420,23 @@ class PrecisionClimateScheduleCard extends HTMLElement {
       });
     } catch (err) {
       this._error = (err && err.message) || "Could not change room away state.";
+      this._render();
+    }
+  }
+
+  async _moveRoom(roomId, delta) {
+    // Current order = the order the rooms are rendered in (schedules array).
+    const order = this._schedules().map((r) => r.room_id);
+    const from = order.indexOf(roomId);
+    const to = from + delta;
+    if (from < 0 || to < 0 || to >= order.length) return;
+    order.splice(to, 0, order.splice(from, 1)[0]);
+    try {
+      await this._hass.callService("precision_climate", "set_settings", {
+        settings: { room_order: order },
+      });
+    } catch (err) {
+      this._error = (err && err.message) || "Could not reorder rooms.";
       this._render();
     }
   }
@@ -735,7 +759,7 @@ class PrecisionClimateScheduleCard extends HTMLElement {
     });
   }
 
-  _renderRoom(room, roomsInfo) {
+  _renderRoom(room, roomsInfo, index = 0, total = 1) {
     // roomsInfo is keyed by room name (as set in StatusSensor).
     const info = roomsInfo[room.name] || {};
     const temp = info.temperature != null ? `${Number(info.temperature).toFixed(1)}°C` : null;
@@ -750,6 +774,9 @@ class PrecisionClimateScheduleCard extends HTMLElement {
     const awayTarget = info.away_target != null ? `${Number(info.away_target).toFixed(1)}°` : "";
     const roomAwayBadge = roomAway ? `<span class="pcs-room-away-badge">🏠 away${awayTarget ? ` (${awayTarget})` : ""}</span>` : "";
     const roomAwayBtn = `<button class="pcs-btn pcs-room-away-btn ${roomAway ? "pcs-room-away-active" : ""}" data-room-away="${room.room_id}|${roomAway ? "0" : "1"}" title="${roomAway ? "Disable away for this room" : "Enable away for this room (caps at away target)"}">${roomAway ? "🏠 Room away" : "🏠 Away"}</button>`;
+    const upBtn = `<button class="pcs-btn pcs-move-btn" data-move="${room.room_id}|up" title="Move room up"${index === 0 ? " disabled" : ""}>▲</button>`;
+    const downBtn = `<button class="pcs-btn pcs-move-btn" data-move="${room.room_id}|down" title="Move room down"${index >= total - 1 ? " disabled" : ""}>▼</button>`;
+    const moveBtns = `<span class="pcs-room-move">${upBtn}${downBtn}</span>`;
 
     // Boost: manual TRV override active for a window. Show a badge + cancel
     // button, and overlay a band on each timeline from now until it expires.
@@ -811,7 +838,7 @@ class PrecisionClimateScheduleCard extends HTMLElement {
     return `<div class="pcs-room${paused ? " pcs-room-paused" : ""}${boosted ? " pcs-room-boosted" : ""}${roomAway ? " pcs-room-away" : ""}">
       <div class="pcs-room-name">
         <span class="pcs-room-name-text">${room.name}${heatIcon}${tempSpan}${pausedBadge}${boostBadge}${roomAwayBadge}</span>
-        <span class="pcs-room-actions">${boostBtn}${roomAwayBtn}${pauseBtn}</span>
+        <span class="pcs-room-actions">${moveBtns}${boostBtn}${roomAwayBtn}${pauseBtn}</span>
       </div>
       ${days}
     </div>`;
@@ -989,6 +1016,9 @@ const STYLE = `
   .pcs-pause-btn.pcs-resume { border-color: var(--warning-color, #d9a13b); color: var(--warning-color, #d9a13b); }
   .pcs-room-paused .pcs-timeline { opacity: .5; }
   .pcs-room-actions { display: flex; align-items: center; gap: 6px; }
+  .pcs-room-move { display: inline-flex; gap: 2px; }
+  .pcs-move-btn { padding: 2px 6px; line-height: 1; font-size: .8em; }
+  .pcs-move-btn[disabled] { opacity: .3; cursor: default; }
 
   /* Per-room away mode */
   .pcs-room-away-badge { font-weight: 600; font-size: .72em; text-transform: uppercase; letter-spacing: .04em; padding: 1px 6px; border-radius: 8px; background: #2563eb; color: #fff; white-space: nowrap; }

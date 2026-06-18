@@ -27,6 +27,7 @@ from ..const import (
     CONF_PRESENCE_ZONE,
     CONF_ROOM_ID,
     CONF_ROOM_NAME,
+    CONF_ROOM_ORDER,
     CONF_ROOMS,
     CONF_SCHEDULE_BLOCKS,
     CONF_SCHEDULE_MODE,
@@ -187,6 +188,19 @@ def build_runtime(data: dict) -> RuntimeConfig:
         notify_services.append(legacy)
 
     settings = dict(data.get(CONF_SETTINGS, {}))
+
+    # Apply the user-defined display order (set from the schedule card). Rooms
+    # listed in room_order come first in that order; any room not listed keeps
+    # its original relative position at the end. Both visual cards iterate this
+    # ordering, so reordering here reorders the schedule card and history card
+    # together. Control logic is order-independent, so this is purely cosmetic.
+    room_order = list(settings.get(CONF_ROOM_ORDER, []))
+    if room_order:
+        rank = {rid: i for i, rid in enumerate(room_order)}
+        fallback = len(room_order)
+        rooms.sort(key=lambda r: rank.get(r.room_id, fallback))
+        schedules.sort(key=lambda s: rank.get(s.room_id, fallback))
+
     presence = PresenceConfig(
         enabled=bool(settings.get(CONF_PRESENCE_ENABLED, False)),
         persons=list(settings.get(CONF_PRESENCE_PERSONS, [])),

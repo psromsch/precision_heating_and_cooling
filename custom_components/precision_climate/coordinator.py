@@ -207,21 +207,23 @@ class PrecisionClimateCoordinator:
         self._boiler_on = boiler is not None and boiler.state == STATE_ON
 
         # A TRV counts as "open" if its setpoint is nearer the force-flow value
-        # than the block-flow value (midpoint of 4 °C and 28 °C ≈ 16 °C).
-        force = force_flow_setpoint(self.mode)
-        block = block_flow_setpoint(self.mode)
-        midpoint = (force + block) / 2
+        # than the block-flow value. Use each TRV's own min/max as the bounds
+        # (real Zigbee TRVs clamp our sentinels to their limits).
         for cfg in self.config.rooms:
-            targets = [self._trv_target(t) for t in cfg.trvs]
-            known = [t for t in targets if t is not None]
+            known = []
+            for trv_eid in cfg.trvs:
+                t = self._trv_target(trv_eid)
+                if t is None:
+                    continue
+                force = self._trv_force_setpoint(trv_eid)
+                block = self._trv_block_setpoint(trv_eid)
+                midpoint = (force + block) / 2
+                opens_toward_force = force >= block
+                known.append((t >= midpoint) if opens_toward_force else (t <= midpoint))
             if not known:
                 continue
             # Open only if every known TRV is on the force-flow side.
-            opens_toward_force = force >= block
-            self._trv_open[cfg.room_id] = all(
-                (t >= midpoint) if opens_toward_force else (t <= midpoint)
-                for t in known
-            )
+            self._trv_open[cfg.room_id] = all(known)
 
     def _setup_presence_tracking(self) -> None:
         """Subscribe to person-entity state changes for presence mode."""
@@ -314,15 +316,21 @@ class PrecisionClimateCoordinator:
         if old_target is not None and abs(old_target - new_target) < 0.05:
             return
         # Ignore our own valve commands (the force/block sentinels).
-        if self._is_trv_sentinel(new_target):
+        entity_id = event.data.get("entity_id", "")
+        if self._is_trv_sentinel(entity_id, new_target):
             return
         self.hass.async_create_task(self.async_set_room_boost(room_id, new_target))
 
-    def _is_trv_sentinel(self, value: float) -> bool:
-        """True if a setpoint is (near) one of our force/block valve commands."""
-        force = force_flow_setpoint(self.mode)
-        block = block_flow_setpoint(self.mode)
-        return abs(value - force) < 0.6 or abs(value - block) < 0.6
+    def _is_trv_sentinel(self, entity_id: str, value: float) -> bool:
+        """True if a setpoint is (near) one of our force/block valve commands.
+
+        Uses the TRV's own min/max bounds so clamped-back values (e.g. a TRV
+        that rounds 4 °C up to 5 °C) are still recognised as ours.
+        """
+        force = self._trv_force_setpoint(entity_id)
+        block = self._trv_block_setpoint(entity_id)
+        tol = max(1.0, abs(force - block) * 0.05)  # at least 1 °C tolerance
+        return abs(value - force) <= tol or abs(value - block) <= tol
 
     @callback
     def _handle_boundary(self, _now: datetime) -> None:
@@ -479,21 +487,32 @@ class PrecisionClimateCoordinator:
         # Boiler.
         if decision.boiler_on != self._boiler_on:
             await self._set_switch(self.config.boiler_switch, decision.boiler_on)
-            # Account the transition for the runtime counters (today/week/month).
             self._runtime.set_boiler(decision.boiler_on, dt_util.utcnow())
             self._save_runtime()
+        elif not decision.boiler_on:
+            # Drift guard: if our cache says OFF but the real switch is ON
+            # (e.g. a manual toggle with no demand), issue the corrective call.
+            real = self.hass.states.get(self.config.boiler_switch)
+            if real is not None and real.state == STATE_ON:
+                await self._set_switch(self.config.boiler_switch, False)
         self._boiler_on = decision.boiler_on
 
-        # TRVs.
+        # TRVs — use each valve's own min/max as open/close bounds so we never
+        # send a value that the device will silently clamp to something different.
         for cfg in self.config.rooms:
             want_open = decision.trv_open.get(cfg.room_id, self._trv_open.get(cfg.room_id, False))
             if want_open != self._trv_open.get(cfg.room_id):
-                setpoint = (
-                    force_flow_setpoint(self.mode)
-                    if want_open
-                    else block_flow_setpoint(self.mode)
-                )
                 for trv in cfg.trvs:
+                    if want_open:
+                        # Ensure the valve is in heat mode before sending the
+                        # setpoint — many Zigbee TRVs ignore set_temperature
+                        # while in 'off' or 'auto' hvac_mode.
+                        await self._set_trv_hvac_mode(trv, "heat")
+                    setpoint = (
+                        self._trv_force_setpoint(trv)
+                        if want_open
+                        else self._trv_block_setpoint(trv)
+                    )
                     await self._set_trv_target(trv, setpoint)
             self._trv_open[cfg.room_id] = want_open
             self._room_heating[cfg.room_id] = is_heating(self._boiler_on, want_open)
@@ -558,6 +577,28 @@ class PrecisionClimateCoordinator:
 
     # --- HA service helpers --------------------------------------------------
 
+    def _trv_force_setpoint(self, entity_id: str) -> float:
+        """Setpoint that fully opens this TRV: its max_temp, or the global default."""
+        state = self.hass.states.get(entity_id)
+        if state is not None:
+            v = state.attributes.get("max_temp")
+            try:
+                return float(v)
+            except (TypeError, ValueError):
+                pass
+        return force_flow_setpoint(self.mode)
+
+    def _trv_block_setpoint(self, entity_id: str) -> float:
+        """Setpoint that fully closes this TRV: its min_temp, or the global default."""
+        state = self.hass.states.get(entity_id)
+        if state is not None:
+            v = state.attributes.get("min_temp")
+            try:
+                return float(v)
+            except (TypeError, ValueError):
+                pass
+        return block_flow_setpoint(self.mode)
+
     async def _set_switch(self, entity_id: str, on: bool) -> None:
         await self.hass.services.async_call(
             "switch",
@@ -571,6 +612,14 @@ class PrecisionClimateCoordinator:
             "climate",
             "set_temperature",
             {ATTR_ENTITY_ID: entity_id, ATTR_TEMPERATURE: setpoint},
+            blocking=False,
+        )
+
+    async def _set_trv_hvac_mode(self, entity_id: str, hvac_mode: str) -> None:
+        await self.hass.services.async_call(
+            "climate",
+            "set_hvac_mode",
+            {ATTR_ENTITY_ID: entity_id, "hvac_mode": hvac_mode},
             blocking=False,
         )
 
@@ -680,10 +729,13 @@ class PrecisionClimateCoordinator:
 
     @callback
     def _handle_runtime_tick(self, _now) -> None:
-        """Periodic tick: fold live on-time in, roll periods over, refresh."""
+        """Periodic tick: fold live on-time in, roll periods over, and run a
+        full evaluation so time-based failsafes (prolonged heating, overheat,
+        TRV unresponsive) advance even during long quiet periods with no sensor
+        state changes."""
         self._runtime.tick(dt_util.utcnow())
         self._save_runtime()
-        self._notify_listeners()
+        self.hass.async_create_task(self.async_evaluate())
 
     def _save_runtime(self) -> None:
         if self._runtime_store is not None:

@@ -72,6 +72,7 @@
         "title": "General settings",
         "description": "Default room is used whenever no room is active. Enable optional sunny-day savings, and choose which notifications to receive.\n\n{detail}",
         "data": {
+          "boiler_switch": "Boiler switch",
           "default_room": "Default active room",
           "notify_services": "Notify services",
           "enabled": "Enable sunny-day savings",
@@ -88,6 +89,7 @@
           "notify_sunny_day": "Notify: sunny-day savings"
         },
         "data_description": {
+          "boiler_switch": "The switch that turns your boiler on and off. You can change it here without reinstalling.",
           "notify_unauthorized_boiler": "Boiler turned on while the system is off/paused or a window is open in an active room — it is forced back off.",
           "notify_prolonged_heating": "The boiler has been running continuously for over 5 hours.",
           "notify_overheating": "A heating room has exceeded the overheat threshold (24°C).",

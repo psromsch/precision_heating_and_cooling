@@ -227,6 +227,7 @@ class PrecisionClimateOptionsFlow(config_entries.OptionsFlow):
         # panel via the set_settings service. Preserve them so editing a room
         # here doesn't wipe them.
         self._settings = dict(merged.get(CONF_SETTINGS, {}))
+        self._boiler_switch: str = merged.get(CONF_BOILER_SWITCH, "")
         # Transient state while adding/editing a room.
         self._editing_id: str | None = None
         self._current_room: dict | None = None
@@ -245,6 +246,7 @@ class PrecisionClimateOptionsFlow(config_entries.OptionsFlow):
     def _save(self):
         """Persist the working state to the entry options and close the dialog."""
         options = {
+            CONF_BOILER_SWITCH: self._boiler_switch,
             CONF_ROOMS: self._rooms,
             CONF_DEFAULT_ROOM: self._default_room,
             CONF_NOTIFY_SERVICES: self._notify_services,
@@ -428,6 +430,9 @@ class PrecisionClimateOptionsFlow(config_entries.OptionsFlow):
         self._ensure_loaded()
         errors: dict[str, str] = {}
         if user_input is not None:
+            boiler = user_input.get(CONF_BOILER_SWITCH, "").strip()
+            if boiler:
+                self._boiler_switch = boiler
             self._default_room = user_input.get(CONF_DEFAULT_ROOM)
             self._notify_services = user_input.get(CONF_NOTIFY_SERVICES, [])
             self._notifications = {
@@ -459,7 +464,12 @@ class PrecisionClimateOptionsFlow(config_entries.OptionsFlow):
         room_options = [
             {"value": r[CONF_ROOM_ID], "label": r[CONF_ROOM_NAME]} for r in self._rooms
         ]
-        schema_dict: dict = {}
+        boiler_key = (
+            vol.Required(CONF_BOILER_SWITCH, default=self._boiler_switch)
+            if self._boiler_switch
+            else vol.Required(CONF_BOILER_SWITCH)
+        )
+        schema_dict: dict = {boiler_key: _entity_picker("switch")}
         if room_options:
             default_room = self._default_room if self._default_room in {
                 r[CONF_ROOM_ID] for r in self._rooms

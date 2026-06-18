@@ -102,3 +102,27 @@ treat the room as individually away (capped to `away_target`); restore when
 state returns to `on`. No learning, fully reactive — fits the obedience
 philosophy. Lower priority than the global zone-based presence that's already
 implemented.
+
+---
+
+## 5. Supplementary electric heater per room
+
+**Idea:** Some rooms have a secondary electric heater (e.g. a smart plug) for
+when the radiator alone can't keep up — typically at night when the boiler
+schedule drops the target or the room is the furthest from the boiler. The
+plug should turn on when the room temperature falls a configurable margin below
+the room's effective target and the radiator is not actively heating, and turn
+off when either the radiator kicks in or the temperature recovers to within a
+smaller margin.
+
+**Why parked:** Requires a per-room `supplementary_heater_entity` (switch/plug)
+in the room config, plus two tunables (`on_offset` and `off_offset` in °C below
+target). The logic is reactive and obedient (no prediction), which fits the
+integration's philosophy — but it adds a new actuator type and more config UI
+surface. Also needs a "master off" propagation so the plug is cut immediately
+when the integration's master switch is turned off.
+
+**If revisited:** add `supplementary_heater` to room config (entity_id + on/off
+offsets); integrate control into `_apply` alongside the TRV command; ensure the
+plug is turned off whenever master is off or the room is paused/away with a
+target low enough that it would never trigger.

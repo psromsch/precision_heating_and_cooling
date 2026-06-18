@@ -306,6 +306,18 @@ class PrecisionClimateCoordinator:
         new_state = event.data.get("new_state")
         if new_state is None:
             return
+
+        # Ignore restore/availability transitions (e.g. HA restart, Zigbee
+        # reconnect). When a TRV comes back from unavailable it re-reports its
+        # setpoint, which is NOT a human action and must never trigger Boost.
+        old_state = event.data.get("old_state")
+        if (
+            old_state is None
+            or old_state.state in (STATE_UNAVAILABLE, STATE_UNKNOWN)
+            or new_state.state in (STATE_UNAVAILABLE, STATE_UNKNOWN)
+        ):
+            return
+
         new_target = new_state.attributes.get(ATTR_TEMPERATURE)
         try:
             new_target = float(new_target) if new_target is not None else None
@@ -314,14 +326,11 @@ class PrecisionClimateCoordinator:
         if new_target is None:
             return
 
-        old_state = event.data.get("old_state")
-        old_target = None
-        if old_state is not None:
-            ot = old_state.attributes.get(ATTR_TEMPERATURE)
-            try:
-                old_target = float(ot) if ot is not None else None
-            except (ValueError, TypeError):
-                old_target = None
+        ot = old_state.attributes.get(ATTR_TEMPERATURE)
+        try:
+            old_target = float(ot) if ot is not None else None
+        except (ValueError, TypeError):
+            old_target = None
 
         # Ignore non-setpoint attribute churn (e.g. current_temperature updates).
         if old_target is not None and abs(old_target - new_target) < 0.05:

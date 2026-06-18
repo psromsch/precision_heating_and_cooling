@@ -23,7 +23,7 @@
  * No build step, no external dependencies.
  */
 
-const HISTORY_CARD_VERSION = "0.9.8";
+const HISTORY_CARD_VERSION = "0.9.9";
 
 // Per-room line colours, assigned round-robin in discovery order.
 const ROOM_COLORS = [
@@ -214,16 +214,10 @@ class PrecisionClimateHistoryCard extends HTMLElement {
 
     const xs = (t) => ((t - t0) / (now - t0)) * W;
 
-    // Away-mode cap for this room (dashed reference line), if configured.
-    const away =
-      info.away_target != null && !Number.isNaN(Number(info.away_target))
-        ? Number(info.away_target)
-        : null;
-
-    // Shared y-scale across temp + target so both line up. The away cap is
-    // folded into the scale so its dashed line is always visible on the chart.
+    // Shared y-scale across temp + target so both line up. (Away mode needs no
+    // separate reference line: when a room goes away its target stepline drops
+    // to the away temperature, which already shows it.)
     const allV = [...tempPts.map((p) => p.v), ...targetPts.map((p) => p.v)];
-    if (away != null) allV.push(away);
     if (!allV.length) {
       return `<div class="pch-room"><div class="pch-room-head"><span class="pch-dot" style="background:${color}"></span>${name}</div><div class="pch-nodata">No data in the last ${this._hours}h.</div></div>`;
     }
@@ -241,12 +235,6 @@ class PrecisionClimateHistoryCard extends HTMLElement {
         return `<rect x="${x1.toFixed(1)}" y="${padT}" width="${Math.max(0, x2 - x1).toFixed(1)}" height="${innerH}" fill="${color}" opacity="0.18"/>`;
       })
       .join("");
-
-    // Away-mode cap: a dashed horizontal reference line at the away target.
-    const awayLine =
-      away != null
-        ? `<line x1="0" y1="${ys(away).toFixed(1)}" x2="${W}" y2="${ys(away).toFixed(1)}" stroke="#8ab4f8" stroke-width="1.5" stroke-dasharray="7 5" vector-effect="non-scaling-stroke" opacity="0.9"/>`
-        : "";
 
     // Target stepline (hold each value until the next sample).
     const targetPath = this._steplinePath(targetPts, xs, ys, now);
@@ -290,8 +278,7 @@ class PrecisionClimateHistoryCard extends HTMLElement {
 
     const stats =
       `<span class="pch-stat" style="color:${color}">${curTemp != null ? curTemp.toFixed(1) + "°" : "—"}</span>` +
-      `<span class="pch-stat pch-target-stat">target ${curTarget != null ? curTarget.toFixed(1) + "°" : "—"}</span>` +
-      (away != null ? `<span class="pch-stat pch-away-stat">away ${away.toFixed(1)}°</span>` : "");
+      `<span class="pch-stat pch-target-stat">target ${curTarget != null ? curTarget.toFixed(1) + "°" : "—"}</span>`;
 
     // Y-axis: 4 evenly-spaced ticks (hi, 2 intermediate, lo).
     const NUM_TICKS = 4;
@@ -323,7 +310,6 @@ class PrecisionClimateHistoryCard extends HTMLElement {
               ${hGrid}
               ${grid}
               ${bands}
-              ${awayLine}
               <path d="${targetPath}" fill="none" stroke="var(--error-color,#d9663b)" stroke-width="2" vector-effect="non-scaling-stroke"/>
               ${tempPaths}
             </svg>
@@ -470,7 +456,6 @@ const STYLE = `
   .pch-stats { font-weight: 400; }
   .pch-stat { font-weight: 600; margin-left: 8px; }
   .pch-target-stat { color: var(--error-color, #d9663b); opacity: .9; }
-  .pch-away-stat { color: #8ab4f8; opacity: .9; }
 
   /* Chart layout: [y-axis] [svg+time-axis] [y-axis] */
   .pch-chart-wrap { display: flex; align-items: stretch; gap: 4px; }

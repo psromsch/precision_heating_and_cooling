@@ -23,7 +23,7 @@
  * No build step, no external dependencies.
  */
 
-const HISTORY_CARD_VERSION = "0.9.4";
+const HISTORY_CARD_VERSION = "0.9.5";
 
 // Per-room line colours, assigned round-robin in discovery order.
 const ROOM_COLORS = [
@@ -80,6 +80,7 @@ class PrecisionClimateHistoryCard extends HTMLElement {
       if (r.thermometer_entity_id) ids.add(r.thermometer_entity_id);
       if (r.target_entity_id) ids.add(r.target_entity_id);
       if (r.heating_entity_id) ids.add(r.heating_entity_id);
+      if (r.active_entity_id) ids.add(r.active_entity_id);
     }
     const boiler = status && status.attributes.boiler_switch_entity_id;
     if (boiler) ids.add(boiler);
@@ -252,7 +253,28 @@ class PrecisionClimateHistoryCard extends HTMLElement {
     // Temperature smooth line; extend to "now" unless the sensor is unavailable.
     const lastTempRaw = this._lastRawState(info.thermometer_entity_id);
     const tempAvailable = lastTempRaw !== null && lastTempRaw !== "unavailable" && lastTempRaw !== "unknown";
-    const tempPath = this._linePath(tempPts, xs, ys, tempAvailable ? now : null);
+
+    // Active rooms heat as soon as they fall below target; passive rooms only
+    // "open and wait". Differentiate the temperature line *per segment*, using
+    // the recorded active-state history: solid + full opacity while the room was
+    // active, dashed + dimmed while passive. Fall back to the current mode for
+    // the whole line when no active history exists yet (fresh install).
+    const activeRanges = this._onRanges(info.active_entity_id, t0, now);
+    const hasActiveHistory = this._series(info.active_entity_id).length > 0;
+    const segments = hasActiveHistory
+      ? this._segmentByActive(tempPts, activeRanges)
+      : [{ active: info.active === true, pts: tempPts }];
+    const tempPaths = segments
+      .map((seg, i) => {
+        const isLast = i === segments.length - 1;
+        const d = this._linePath(seg.pts, xs, ys, isLast && tempAvailable ? now : null);
+        if (!d) return "";
+        const dash = seg.active ? "" : ` stroke-dasharray="6 4"`;
+        const opacity = seg.active ? "1" : "0.7";
+        const width = seg.active ? "2.5" : "2";
+        return `<path d="${d}" fill="none" stroke="${color}" stroke-width="${width}" vector-effect="non-scaling-stroke" stroke-linejoin="round"${dash} opacity="${opacity}"/>`;
+      })
+      .join("");
 
     // Hour gridlines every 6h.
     const grid = this._hourGrid(t0, now, xs, padT, innerH);
@@ -260,13 +282,8 @@ class PrecisionClimateHistoryCard extends HTMLElement {
     const curTemp = tempPts.length ? tempPts[tempPts.length - 1].v : null;
     const curTarget = targetPts.length ? targetPts[targetPts.length - 1].v : null;
 
-    // Active rooms heat as soon as they fall below target; passive rooms only
-    // "open and wait". Differentiate the temperature line: solid + full opacity
-    // when the room is currently active, dashed + dimmed when passive.
+    // Badge reflects the room's *current* mode.
     const isActive = info.active === true;
-    const tempDash = isActive ? "" : ` stroke-dasharray="6 4"`;
-    const tempOpacity = isActive ? "1" : "0.7";
-    const tempWidth = isActive ? "2.5" : "2";
     const modeBadge = `<span class="pch-mode-badge ${isActive ? "pch-mode-active" : "pch-mode-passive"}">${isActive ? "active" : "passive"}</span>`;
 
     const stats =
@@ -306,7 +323,7 @@ class PrecisionClimateHistoryCard extends HTMLElement {
               ${bands}
               ${awayLine}
               <path d="${targetPath}" fill="none" stroke="var(--error-color,#d9663b)" stroke-width="2" vector-effect="non-scaling-stroke"/>
-              <path d="${tempPath}" fill="none" stroke="${color}" stroke-width="${tempWidth}" vector-effect="non-scaling-stroke" stroke-linejoin="round"${tempDash} opacity="${tempOpacity}"/>
+              ${tempPaths}
             </svg>
             <div class="pch-time-axis">${this._timeLabels(t0, now)}</div>
           </div>
@@ -377,6 +394,29 @@ class PrecisionClimateHistoryCard extends HTMLElement {
   // Build [{start, end}] ranges where a binary entity was "on".
   _onRanges(entityId, t0, now) {
     return this._onRangesFromSeries(this._series(entityId), t0, now, "on");
+  }
+
+  _tInRanges(t, ranges) {
+    return ranges.some((r) => t >= r.start && t < r.end);
+  }
+
+  // Split a point series into consecutive runs sharing the same active state,
+  // derived from the active "on" ranges. Adjacent runs share their boundary
+  // point so the rendered line stays visually continuous (no gaps).
+  _segmentByActive(pts, ranges) {
+    if (!pts.length) return [];
+    const segs = [];
+    let cur = { active: this._tInRanges(pts[0].t, ranges), pts: [pts[0]] };
+    for (let i = 1; i < pts.length; i++) {
+      const a = this._tInRanges(pts[i].t, ranges);
+      cur.pts.push(pts[i]); // extend first so the segment reaches this point
+      if (a !== cur.active) {
+        segs.push(cur);
+        cur = { active: a, pts: [pts[i]] }; // next run starts at the shared point
+      }
+    }
+    segs.push(cur);
+    return segs;
   }
 
   _onRangesFromSeries(series, t0, now, onState) {

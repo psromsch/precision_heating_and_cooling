@@ -23,7 +23,7 @@
  * No build step, no external dependencies.
  */
 
-const HISTORY_CARD_VERSION = "0.9.0";
+const HISTORY_CARD_VERSION = "0.9.4";
 
 // Per-room line colours, assigned round-robin in discovery order.
 const ROOM_COLORS = [
@@ -259,6 +259,16 @@ class PrecisionClimateHistoryCard extends HTMLElement {
 
     const curTemp = tempPts.length ? tempPts[tempPts.length - 1].v : null;
     const curTarget = targetPts.length ? targetPts[targetPts.length - 1].v : null;
+
+    // Active rooms heat as soon as they fall below target; passive rooms only
+    // "open and wait". Differentiate the temperature line: solid + full opacity
+    // when the room is currently active, dashed + dimmed when passive.
+    const isActive = info.active === true;
+    const tempDash = isActive ? "" : ` stroke-dasharray="6 4"`;
+    const tempOpacity = isActive ? "1" : "0.7";
+    const tempWidth = isActive ? "2.5" : "2";
+    const modeBadge = `<span class="pch-mode-badge ${isActive ? "pch-mode-active" : "pch-mode-passive"}">${isActive ? "active" : "passive"}</span>`;
+
     const stats =
       `<span class="pch-stat" style="color:${color}">${curTemp != null ? curTemp.toFixed(1) + "°" : "—"}</span>` +
       `<span class="pch-stat pch-target-stat">target ${curTarget != null ? curTarget.toFixed(1) + "°" : "—"}</span>` +
@@ -284,7 +294,7 @@ class PrecisionClimateHistoryCard extends HTMLElement {
     return `
       <div class="pch-room">
         <div class="pch-room-head">
-          <span><span class="pch-dot" style="background:${color}"></span>${name}</span>
+          <span><span class="pch-dot" style="background:${color}"></span>${name}${modeBadge}</span>
           <span class="pch-stats">${stats}</span>
         </div>
         <div class="pch-chart-wrap">
@@ -296,7 +306,7 @@ class PrecisionClimateHistoryCard extends HTMLElement {
               ${bands}
               ${awayLine}
               <path d="${targetPath}" fill="none" stroke="var(--error-color,#d9663b)" stroke-width="2" vector-effect="non-scaling-stroke"/>
-              <path d="${tempPath}" fill="none" stroke="${color}" stroke-width="2.5" vector-effect="non-scaling-stroke" stroke-linejoin="round"/>
+              <path d="${tempPath}" fill="none" stroke="${color}" stroke-width="${tempWidth}" vector-effect="non-scaling-stroke" stroke-linejoin="round"${tempDash} opacity="${tempOpacity}"/>
             </svg>
             <div class="pch-time-axis">${this._timeLabels(t0, now)}</div>
           </div>
@@ -412,6 +422,9 @@ const STYLE = `
   .pch-room { margin-bottom: 14px; }
   .pch-room-head { display: flex; align-items: center; justify-content: space-between; font-weight: 600; font-size: .95em; margin-bottom: 2px; }
   .pch-dot { display: inline-block; width: 9px; height: 9px; border-radius: 50%; margin-right: 6px; vertical-align: middle; }
+  .pch-mode-badge { font-weight: 600; font-size: .68em; text-transform: uppercase; letter-spacing: .04em; padding: 1px 6px; border-radius: 8px; margin-left: 8px; vertical-align: middle; }
+  .pch-mode-active { background: var(--error-color, #d9663b); color: #fff; }
+  .pch-mode-passive { background: var(--secondary-background-color, rgba(255,255,255,.1)); color: var(--secondary-text-color, #bbb); border: 1px solid var(--divider-color, #444); }
   .pch-stats { font-weight: 400; }
   .pch-stat { font-weight: 600; margin-left: 8px; }
   .pch-target-stat { color: var(--error-color, #d9663b); opacity: .9; }

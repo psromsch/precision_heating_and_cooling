@@ -10,13 +10,17 @@ Algorithm (heating):
 * Boiler (system-level latching hysteresis, driven by ACTIVE rooms only):
     - Turn ON when any active room temp <= demand_threshold (target - lower_hyst).
     - Turn OFF when ALL active rooms are satisfied (temp >= satisfied_threshold).
+    - Turn OFF when every active room has an unavailable thermometer (reason:
+      no_active_temp) — it is safer to stop the boiler than to hold indefinitely
+      with no temperature feedback.
     - Otherwise hold the previous boiler state.
 
 * TRV per room (latching hysteresis, independent of the boiler so passive rooms
   can "open and wait"):
     - Active room: open when temp < target, close when temp >= satisfied_threshold.
+      If thermometer is unavailable: close (cannot confirm demand, fail-safe shut).
     - Passive room: open when temp <= demand_threshold, close when temp >=
-      satisfied_threshold.
+      satisfied_threshold. If thermometer is unavailable: hold previous state.
     - Otherwise hold the previous TRV state.
 
 Overrides (highest priority first):
@@ -55,7 +59,11 @@ def _trv_intent(
 ) -> bool:
     """Decide whether a room's TRV should be open, with latching hysteresis."""
     if room.temperature is None:
-        # Thermometer unavailable: hold the previous state rather than guess.
+        if room.is_active:
+            # Active room with no thermometer: close the valve. We cannot confirm
+            # demand or satisfaction, so the safe choice is to stop flow.
+            return False
+        # Passive room with no thermometer: hold — no action is safest.
         return prev_open
 
     satisfied_threshold = eff_target + room.upper_hysteresis
@@ -110,6 +118,14 @@ def evaluate(
 
     # --- Boiler latching hysteresis, driven by active rooms only. ------------
     known_active = [r for r in active_rooms if r.temperature is not None]
+
+    # If there are active rooms but every thermometer is offline, turn the
+    # boiler off. Holding indefinitely with no feedback is more dangerous than
+    # briefly cutting heat until at least one sensor recovers.
+    if active_rooms and not known_active:
+        return ControlDecision(
+            boiler_on=False, trv_open=trv_open, reason="no_active_temp"
+        )
 
     demand = any(
         r.temperature <= (eff_targets[r.room_id] - r.lower_hysteresis)

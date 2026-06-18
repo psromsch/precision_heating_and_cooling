@@ -163,8 +163,47 @@ def test_sunny_day_still_heats_below_reduced_minimum():
 
 # --- Unavailable thermometer -------------------------------------------------
 
-def test_unavailable_thermometer_holds_trv_and_does_not_trigger():
-    rooms = [room(temperature=None)]
+def test_unavailable_thermometer_passive_holds_trv():
+    # Passive room with no thermometer: hold previous state, no boiler effect.
+    rooms = [room(temperature=None, is_active=False)]
     decision = evaluate(rooms, SystemState(boiler_on=False, trv_open={"r1": True}))
     assert decision.boiler_on is False
     assert decision.trv_open["r1"] is True  # held
+
+
+def test_active_room_thermometer_offline_closes_trv():
+    # Active room with no thermometer: TRV must close (fail-safe).
+    rooms = [room(temperature=None, is_active=True)]
+    decision = evaluate(rooms, SystemState(boiler_on=False, trv_open={"r1": True}))
+    assert decision.trv_open["r1"] is False
+    assert decision.reason == "no_active_temp"
+
+
+def test_all_active_rooms_offline_turns_boiler_off():
+    # Every active room has lost its thermometer: boiler must stop.
+    r1 = room(room_id="r1", temperature=None, is_active=True)
+    r2 = room(room_id="r2", temperature=None, is_active=True)
+    decision = evaluate([r1, r2], SystemState(boiler_on=True))
+    assert decision.boiler_on is False
+    assert decision.reason == "no_active_temp"
+
+
+def test_partial_active_offline_uses_remaining_sensors():
+    # One active room has no thermometer; another is cold -> boiler should fire.
+    offline = room(room_id="offline", temperature=None, is_active=True)
+    cold = room(room_id="cold", temperature=18.0, target=20.0, is_active=True)
+    decision = evaluate([offline, cold], SystemState(boiler_on=False))
+    assert decision.boiler_on is True
+    assert decision.reason == "demand"
+    assert decision.trv_open["offline"] is False  # offline active room TRV closed
+
+
+def test_passive_room_thermometer_offline_holds_trv():
+    # Passive room with no thermometer: hold previous TRV state.
+    passive = room(room_id="p1", temperature=None, is_active=False)
+    # Previous state: open -> stays open
+    decision = evaluate([passive], SystemState(boiler_on=False, trv_open={"p1": True}))
+    assert decision.trv_open["p1"] is True
+    # Previous state: closed -> stays closed
+    decision = evaluate([passive], SystemState(boiler_on=False, trv_open={"p1": False}))
+    assert decision.trv_open["p1"] is False

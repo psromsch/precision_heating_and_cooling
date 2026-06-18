@@ -30,7 +30,7 @@ const DAY_ORDER = ["all", "weekday", "weekend", "mon", "tue", "wed", "thu", "fri
 
 // Shown in the card footer so you can confirm which card version is live
 // after a HACS update (keep in sync with manifest.json).
-const CARD_VERSION = "0.9.3";
+const CARD_VERSION = "0.9.4";
 
 const pad = (n) => String(n).padStart(2, "0");
 const minToHHMM = (m) => {
@@ -767,6 +767,8 @@ class PrecisionClimateScheduleCard extends HTMLElement {
 
     const heatIcon = heating ? `<span class="pcs-heat-icon" title="Heating">🔥</span>` : "";
     const tempSpan = temp ? `<span class="pcs-cur-temp">(${temp})</span>` : "";
+    const isActive = info.active === true;
+    const modeBadge = `<span class="pcs-mode-badge ${isActive ? "pcs-mode-active" : "pcs-mode-passive"}" title="${isActive ? "Active: heats as soon as it falls below target" : "Passive: only opens once genuinely cold, never calls the boiler"}">${isActive ? "active" : "passive"}</span>`;
     const paused = !!info.paused;
     const pausedBadge = paused ? `<span class="pcs-paused-badge">paused</span>` : "";
     const pauseBtn = `<button class="pcs-btn pcs-pause-btn ${paused ? "pcs-resume" : ""}" data-pause="${room.room_id}|${paused ? "0" : "1"}" title="${paused ? "Resume room" : "Pause room (target 5°C until resumed)"}">${paused ? "▶ Resume" : "⏸ Pause"}</button>`;
@@ -837,7 +839,7 @@ class PrecisionClimateScheduleCard extends HTMLElement {
 
     return `<div class="pcs-room${paused ? " pcs-room-paused" : ""}${boosted ? " pcs-room-boosted" : ""}${roomAway ? " pcs-room-away" : ""}">
       <div class="pcs-room-name">
-        <span class="pcs-room-name-text">${room.name}${heatIcon}${tempSpan}${pausedBadge}${boostBadge}${roomAwayBadge}</span>
+        <span class="pcs-room-name-text">${room.name}${modeBadge}${heatIcon}${tempSpan}${pausedBadge}${boostBadge}${roomAwayBadge}</span>
         <span class="pcs-room-actions">${moveBtns}${boostBtn}${roomAwayBtn}${pauseBtn}</span>
       </div>
       ${days}
@@ -1015,6 +1017,9 @@ const STYLE = `
   .pcs-pause-btn { white-space: nowrap; }
   .pcs-pause-btn.pcs-resume { border-color: var(--warning-color, #d9a13b); color: var(--warning-color, #d9a13b); }
   .pcs-room-paused .pcs-timeline { opacity: .5; }
+  .pcs-mode-badge { font-weight: 600; font-size: .68em; text-transform: uppercase; letter-spacing: .04em; padding: 1px 6px; border-radius: 8px; margin-left: 8px; vertical-align: middle; }
+  .pcs-mode-active { background: var(--error-color, #d9663b); color: #fff; }
+  .pcs-mode-passive { background: var(--secondary-background-color, rgba(255,255,255,.1)); color: var(--secondary-text-color, #bbb); border: 1px solid var(--divider-color, #444); }
   .pcs-room-actions { display: flex; align-items: center; gap: 6px; }
   .pcs-room-move { display: inline-flex; gap: 2px; }
   .pcs-move-btn { padding: 2px 6px; line-height: 1; font-size: .8em; }

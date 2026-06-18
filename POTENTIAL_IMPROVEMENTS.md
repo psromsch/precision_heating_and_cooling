@@ -156,8 +156,24 @@ philosophy. Cooling alone is reactive and would fit cleanly; it's parked mainly
 because the integration is heating-first today and the cooling path duplicates a
 lot of loop/UI surface for a feature only used part of the year.
 
+**Same integration, not a separate one:** everything around the decision is
+already shared — room model, schedule blocks, active/passive, master/pause/away,
+presence, the card UI and history charts. Splitting cooling into its own
+integration would duplicate all of it and force the two to stay in sync forever.
+It's the same control problem with the inequality flipped, so it belongs here.
+
+**Dual targets are mandatory.** A schedule block today stores one `target`, but
+one number can't serve both modes: 18 °C means "heat to 18" in winter and
+"freeze to 18" in summer. Each room/block needs its own `heat_target` and
+`cool_target`, and the system picks which is live from an **explicit mode**
+(heat / cool / off) — never by guessing the season — so it stays obedient. Mode
+selection is where the real complexity lives (a global manual toggle is the
+obedient default; auto-by-outdoor-temp would be predictive and is avoided).
+
 **If revisited:**
 - Per-room optional `ac_entity` (a `climate` entity) in the room config.
+- Separate `heat_target` and `cool_target` per schedule block, plus a global
+  heat/cool/off mode toggle that selects which target is live.
 - **Cooling:** reuse the schedule/target machinery; add a `cool_hysteresis` and
   drive the AC with the inverted comparison (on when `temp ≥ target + hyst`, off
   when `temp ≤ target − hyst`). Respect master-off, pause and away exactly like

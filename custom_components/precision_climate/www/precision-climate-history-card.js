@@ -23,7 +23,7 @@
  * No build step, no external dependencies.
  */
 
-const HISTORY_CARD_VERSION = "0.9.5";
+const HISTORY_CARD_VERSION = "0.9.8";
 
 // Per-room line colours, assigned round-robin in discovery order.
 const ROOM_COLORS = [
@@ -269,9 +269,11 @@ class PrecisionClimateHistoryCard extends HTMLElement {
         const isLast = i === segments.length - 1;
         const d = this._linePath(seg.pts, xs, ys, isLast && tempAvailable ? now : null);
         if (!d) return "";
-        const dash = seg.active ? "" : ` stroke-dasharray="6 4"`;
-        const opacity = seg.active ? "1" : "0.7";
-        const width = seg.active ? "2.5" : "2";
+        // Active: solid. Passive: a row of fine round dots (not dashes) so it
+        // can't be confused with the solid red target stepline.
+        const dash = seg.active ? "" : ` stroke-dasharray="0.5 5" stroke-linecap="round"`;
+        const opacity = seg.active ? "1" : "0.85";
+        const width = seg.active ? "2.5" : "2.5";
         return `<path d="${d}" fill="none" stroke="${color}" stroke-width="${width}" vector-effect="non-scaling-stroke" stroke-linejoin="round"${dash} opacity="${opacity}"/>`;
       })
       .join("");

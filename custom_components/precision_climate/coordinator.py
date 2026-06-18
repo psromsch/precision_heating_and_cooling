@@ -98,7 +98,13 @@ class PrecisionClimateCoordinator:
         self._room_paused: set[str] = set()
         # Per-room away: each room's target is capped at its away_target while it
         # is in this set. Manual-only (no timer); independent from global away.
+        # Persisted via _room_away_store so it survives reloads without triggering one.
         self._room_away: set[str] = set()
+        self._room_away_store: Store | None = (
+            Store(hass, 1, f"{DOMAIN}_{entry_id}_room_away")
+            if entry_id is not None
+            else None
+        )
         # Per-room boost: a manual TRV change overrides the schedule target AND
         # active/passive flag for a configured number of hours. Maps room_id ->
         # {"target": float, "expires": datetime (UTC)}. Each has an expiry timer.
@@ -188,6 +194,11 @@ class PrecisionClimateCoordinator:
         # it off). Without this, a fresh coordinator assumes everything is off
         # and would skip the corrective service call.
         self._reconcile_initial_state()
+        # Restore per-room away flags.
+        if self._room_away_store is not None:
+            data = await self._room_away_store.async_load()
+            if isinstance(data, list):
+                self._room_away = set(data)
         # Restore the boiler runtime counters and re-anchor from the *real* boiler
         # state (downtime must not count as heating, so on_since starts fresh).
         if self._runtime_store is not None:
@@ -876,6 +887,8 @@ class PrecisionClimateCoordinator:
             self._room_away.add(room_id)
         else:
             self._room_away.discard(room_id)
+        if self._room_away_store is not None:
+            await self._room_away_store.async_save(list(self._room_away))
         await self.async_evaluate()
 
     # --- Child lock ----------------------------------------------------------

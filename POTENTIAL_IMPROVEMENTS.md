@@ -126,3 +126,61 @@ when the integration's master switch is turned off.
 offsets); integrate control into `_apply` alongside the TRV command; ensure the
 plug is turned off whenever master is off or the room is paused/away with a
 target low enough that it would never trigger.
+
+---
+
+## 6. Air-conditioner inclusion (summer cooling, and AC-as-heater on solar surplus)
+
+**Idea:** Bring AC units into the same per-room, schedule-driven control the TRVs
+already get, in two distinct modes:
+
+1. **Summer cooling.** When a room's temperature rises *above* its effective
+   target (plus a hysteresis band), command the room's AC into `cool` mode; turn
+   it off once the room drops back within the band. This is the exact mirror of
+   the existing bang-bang heating loop — same schedules, same targets, same
+   active/passive distinction — just with the inequality flipped.
+2. **AC-as-heater on solar surplus.** In shoulder/winter conditions, a heat-pump
+   AC running in `heat` mode can be cheaper than the gas boiler *when there is
+   enough on-site solar generation to power it*. When a configurable solar
+   surplus threshold is met, prefer the AC (heat mode) over opening the TRV /
+   firing the boiler for that room; fall back to the boiler when the sun goes in.
+
+**Why parked:** Both add a fundamentally new actuator type — a `climate` entity
+rather than a TRV — which means new state handling (HVAC modes, setpoints,
+fan/swing attributes), a per-room `ac_entity` config selector, and a season/mode
+question the system currently never asks (heat vs. cool). The solar-surplus
+variant is also mildly **predictive**: deciding when "enough" solar is available
+involves a threshold that's only meaningful with a power/solar sensor and some
+debouncing (clouds), which pushes against the strict-obedience, purely-reactive
+philosophy. Cooling alone is reactive and would fit cleanly; it's parked mainly
+because the integration is heating-first today and the cooling path duplicates a
+lot of loop/UI surface for a feature only used part of the year.
+
+**Same integration, not a separate one:** everything around the decision is
+already shared — room model, schedule blocks, active/passive, master/pause/away,
+presence, the card UI and history charts. Splitting cooling into its own
+integration would duplicate all of it and force the two to stay in sync forever.
+It's the same control problem with the inequality flipped, so it belongs here.
+
+**Dual targets are mandatory.** A schedule block today stores one `target`, but
+one number can't serve both modes: 18 °C means "heat to 18" in winter and
+"freeze to 18" in summer. Each room/block needs its own `heat_target` and
+`cool_target`, and the system picks which is live from an **explicit mode**
+(heat / cool / off) — never by guessing the season — so it stays obedient. Mode
+selection is where the real complexity lives (a global manual toggle is the
+obedient default; auto-by-outdoor-temp would be predictive and is avoided).
+
+**If revisited:**
+- Per-room optional `ac_entity` (a `climate` entity) in the room config.
+- Separate `heat_target` and `cool_target` per schedule block, plus a global
+  heat/cool/off mode toggle that selects which target is live.
+- **Cooling:** reuse the schedule/target machinery; add a `cool_hysteresis` and
+  drive the AC with the inverted comparison (on when `temp ≥ target + hyst`, off
+  when `temp ≤ target − hyst`). Respect master-off, pause and away exactly like
+  the TRV path.
+- **AC-as-heater:** a single global `solar_threshold_w` setting plus a
+  solar/surplus power sensor; when surplus ≥ threshold, route a room's heat
+  demand to its AC (heat mode) instead of the boiler. Keep it reactive — act on
+  the *current* measured surplus with a short debounce, never a forecast — so it
+  still honours the obedience principle. Surface clearly on the status card which
+  rooms are being heated by AC vs. boiler, and why.

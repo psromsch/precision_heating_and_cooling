@@ -121,8 +121,15 @@ class PrecisionClimateCoordinator:
         self._room_heating: dict[str, bool] = {r.room_id: False for r in self.config.rooms}
 
         # Away mode source tracking.
-        self._away_source: str | None = None   # "manual" | "presence" | None
+        self._away_source: str | None = None   # "manual" | "presence" | "holiday" | None
         self._grace_unsub = None               # async_call_later handle for the grace timer
+        # Persisted so a restart can tell apart manual away (sticky) from
+        # presence/holiday away (re-derived on boot, never restored from switch state).
+        self._away_source_store: Store | None = (
+            Store(hass, 1, f"{DOMAIN}_{entry_id}_away_source")
+            if entry_id is not None
+            else None
+        )
 
         # Sunny-day savings (assessed once per morning).
         self._sunny_active: bool = False
@@ -199,6 +206,12 @@ class PrecisionClimateCoordinator:
             data = await self._room_away_store.async_load()
             if isinstance(data, list):
                 self._room_away = set(data)
+        # Restore the away source so the away switch's restore path knows whether
+        # the last active away was manual (sticky) or presence/holiday (re-derived).
+        if self._away_source_store is not None:
+            src_data = await self._away_source_store.async_load()
+            if isinstance(src_data, dict):
+                self._away_source = src_data.get("source")
         # Restore the boiler runtime counters and re-anchor from the *real* boiler
         # state (downtime must not count as heating, so on_since starts fresh).
         if self._runtime_store is not None:
@@ -750,6 +763,7 @@ class PrecisionClimateCoordinator:
         """Engage/disengage away mode from presence automation."""
         self._away_on = on
         self._away_source = "presence" if on else None
+        self._save_away_source()
         # Keep the HA away switch in sync.
         away_switch = self._away_switch_entity_id()
         if away_switch:
@@ -866,6 +880,7 @@ class PrecisionClimateCoordinator:
                 return
             self._away_on = False
             self._away_source = None
+        self._save_away_source()
         away_switch = self._away_switch_entity_id()
         if away_switch:
             await self._set_switch(away_switch, on)
@@ -898,9 +913,20 @@ class PrecisionClimateCoordinator:
     def away_on(self) -> bool:
         return self._away_on
 
+    @property
+    def away_source(self) -> str | None:
+        return self._away_source
+
+    def _save_away_source(self) -> None:
+        if self._away_source_store is not None:
+            self._away_source_store.async_delay_save(
+                lambda: {"source": self._away_source}, 5
+            )
+
     async def async_set_away(self, on: bool, source: str = "manual") -> None:
         self._away_on = on
         self._away_source = "manual" if on else None
+        self._save_away_source()
         # When manually disengaging, re-evaluate presence so it can re-engage
         # if still nobody home (allows presence to take back control).
         self._cancel_grace_timer()

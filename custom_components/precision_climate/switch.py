@@ -64,7 +64,14 @@ class AwayModeSwitch(PrecisionBaseEntity, SwitchEntity, RestoreEntity):
     async def async_added_to_hass(self) -> None:
         await super().async_added_to_hass()
         last = await self.async_get_last_state()
-        if last is not None and last.state == STATE_ON:
+        # Only restore manual away — presence and holiday away are re-derived on
+        # startup by their own subsystems. Restoring presence-away as "manual"
+        # would make it sticky and prevent presence from ever clearing it again.
+        if (
+            last is not None
+            and last.state == STATE_ON
+            and self._coordinator.away_source == "manual"
+        ):
             await self._coordinator.async_set_away(True)
 
     @property

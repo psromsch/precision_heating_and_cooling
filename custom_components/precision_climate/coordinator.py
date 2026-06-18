@@ -352,6 +352,28 @@ class PrecisionClimateCoordinator:
         tol = max(1.0, abs(force - block) * 0.05)  # at least 1 °C tolerance
         return abs(value - force) <= tol or abs(value - block) <= tol
 
+    def _trv_setpoint_drifted(self, entity_id: str, want_open: bool) -> bool:
+        """True if the TRV's real setpoint isn't the sentinel we intend for it.
+
+        Lets ``_apply`` correct a valve sitting at a stale or manual setpoint even
+        when our cached commanded-state already matches the decision. Unavailable
+        TRVs are skipped (we can't read or correct them). The setpoints already
+        use each valve's own max/min, so once a corrective command lands the real
+        value matches the sentinel and this stops firing — no per-cycle spam.
+        """
+        real = self._trv_target(entity_id)
+        if real is None:
+            return False
+        intended = (
+            self._trv_force_setpoint(entity_id)
+            if want_open
+            else self._trv_block_setpoint(entity_id)
+        )
+        force = self._trv_force_setpoint(entity_id)
+        block = self._trv_block_setpoint(entity_id)
+        tol = max(1.0, abs(force - block) * 0.05)
+        return abs(real - intended) > tol
+
     @callback
     def _handle_boundary(self, _now: datetime) -> None:
         self.hass.async_create_task(self.async_evaluate())
@@ -521,19 +543,27 @@ class PrecisionClimateCoordinator:
         # send a value that the device will silently clamp to something different.
         for cfg in self.config.rooms:
             want_open = decision.trv_open.get(cfg.room_id, self._trv_open.get(cfg.room_id, False))
-            if want_open != self._trv_open.get(cfg.room_id):
-                for trv in cfg.trvs:
-                    if want_open:
-                        # Ensure the valve is in heat mode before sending the
-                        # setpoint — many Zigbee TRVs ignore set_temperature
-                        # while in 'off' or 'auto' hvac_mode.
-                        await self._set_trv_hvac_mode(trv, "heat")
-                    setpoint = (
-                        self._trv_force_setpoint(trv)
-                        if want_open
-                        else self._trv_block_setpoint(trv)
-                    )
-                    await self._set_trv_target(trv, setpoint)
+            state_changed = want_open != self._trv_open.get(cfg.room_id)
+            for trv in cfg.trvs:
+                # Command the valve when the desired state changed OR when its
+                # real setpoint has drifted from the sentinel we intend for it
+                # (the TRV analog of the boiler drift guard). The latter corrects
+                # a valve left at a stale target — e.g. one carried over from a
+                # previous system, or a manual change our cache didn't see — even
+                # when our cached commanded-state already matches the decision.
+                if not (state_changed or self._trv_setpoint_drifted(trv, want_open)):
+                    continue
+                if want_open:
+                    # Ensure the valve is in heat mode before sending the
+                    # setpoint — many Zigbee TRVs ignore set_temperature
+                    # while in 'off' or 'auto' hvac_mode.
+                    await self._set_trv_hvac_mode(trv, "heat")
+                setpoint = (
+                    self._trv_force_setpoint(trv)
+                    if want_open
+                    else self._trv_block_setpoint(trv)
+                )
+                await self._set_trv_target(trv, setpoint)
             self._trv_open[cfg.room_id] = want_open
             self._room_heating[cfg.room_id] = is_heating(self._boiler_on, want_open)
 

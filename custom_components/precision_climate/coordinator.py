@@ -33,6 +33,7 @@ from homeassistant.const import (
     STATE_UNKNOWN,
 )
 from homeassistant.core import Event, HomeAssistant, callback
+from homeassistant.helpers import condition
 from homeassistant.helpers.event import (
     async_call_later,
     async_track_point_in_time,
@@ -740,6 +741,22 @@ class PrecisionClimateCoordinator:
             state = self.hass.states.get(person_eid)
             if state is None:
                 continue
+            # Preferred: geographic membership. A person's *state* is only the
+            # smallest zone they're in (e.g. "ENAP - Oficina"), so string-matching
+            # it against the configured zone fails whenever they're at home/work/
+            # any sub-zone inside it. Comparing GPS coordinates to the zone radius
+            # (HA's condition.zone, which also accounts for gps_accuracy) correctly
+            # treats anyone physically inside the zone as home.
+            if state.attributes.get("latitude") is not None:
+                try:
+                    if condition.zone(self.hass, zone_state, state):
+                        return True
+                    # Has coordinates but is outside the zone → genuinely away.
+                    continue
+                except Exception:  # noqa: BLE001 - never let presence math crash the loop
+                    pass
+            # Fallback for non-GPS trackers that only report home/not_home or a
+            # zone name as their state.
             if state.state.lower() == zone_name or state.state.lower() == "home":
                 return True
         return False

@@ -33,7 +33,6 @@ from homeassistant.const import (
     STATE_UNKNOWN,
 )
 from homeassistant.core import Event, HomeAssistant, callback
-from homeassistant.helpers import condition
 from homeassistant.helpers.event import (
     async_call_later,
     async_track_point_in_time,
@@ -729,6 +728,17 @@ class PrecisionClimateCoordinator:
                     self._make_grace_expiry(),
                 )
 
+    @staticmethod
+    def _haversine_m(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
+        """Great-circle distance in metres between two GPS points."""
+        import math
+        R = 6_371_000.0
+        phi1, phi2 = math.radians(lat1), math.radians(lat2)
+        dphi = math.radians(lat2 - lat1)
+        dlam = math.radians(lon2 - lon1)
+        a = math.sin(dphi / 2) ** 2 + math.cos(phi1) * math.cos(phi2) * math.sin(dlam / 2) ** 2
+        return 2 * R * math.asin(math.sqrt(a))
+
     def _is_anyone_home(self) -> bool:
         zone_eid = self.config.presence.zone
         if not zone_eid:
@@ -736,27 +746,28 @@ class PrecisionClimateCoordinator:
         zone_state = self.hass.states.get(zone_eid)
         if zone_state is None:
             return True
+        zone_lat = zone_state.attributes.get("latitude")
+        zone_lon = zone_state.attributes.get("longitude")
+        zone_radius = zone_state.attributes.get("radius", 100)
         zone_name = (zone_state.attributes.get("friendly_name") or "").lower()
         for person_eid in self.config.presence.persons:
             state = self.hass.states.get(person_eid)
             if state is None:
                 continue
-            # Preferred: geographic membership. A person's *state* is only the
-            # smallest zone they're in (e.g. "ENAP - Oficina"), so string-matching
-            # it against the configured zone fails whenever they're at home/work/
-            # any sub-zone inside it. Comparing GPS coordinates to the zone radius
-            # (HA's condition.zone, which also accounts for gps_accuracy) correctly
-            # treats anyone physically inside the zone as home.
-            if state.attributes.get("latitude") is not None:
-                try:
-                    if condition.zone(self.hass, zone_state, state):
-                        return True
-                    # Has coordinates but is outside the zone → genuinely away.
-                    continue
-                except Exception:  # noqa: BLE001 - never let presence math crash the loop
-                    pass
-            # Fallback for non-GPS trackers that only report home/not_home or a
-            # zone name as their state.
+            lat = state.attributes.get("latitude")
+            lon = state.attributes.get("longitude")
+            if lat is not None and lon is not None and zone_lat is not None and zone_lon is not None:
+                # Geographic check: is this person's GPS point inside the zone's radius?
+                # Using Haversine so we own the logic and it can't fail on API changes.
+                # We add gps_accuracy to the allowed radius so a person just inside the
+                # zone boundary isn't incorrectly reported as outside due to GPS drift.
+                accuracy = state.attributes.get("gps_accuracy") or 0
+                dist = self._haversine_m(lat, lon, zone_lat, zone_lon)
+                if dist <= zone_radius + accuracy:
+                    return True
+                # Has GPS but is outside the zone — genuinely away; don't fall through.
+                continue
+            # Non-GPS tracker: fall back to comparing the state string.
             if state.state.lower() == zone_name or state.state.lower() == "home":
                 return True
         return False

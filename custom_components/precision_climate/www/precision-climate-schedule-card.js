@@ -30,7 +30,7 @@ const DAY_ORDER = ["all", "weekday", "weekend", "mon", "tue", "wed", "thu", "fri
 
 // Shown in the card footer so you can confirm which card version is live
 // after a HACS update (keep in sync with manifest.json).
-const CARD_VERSION = "0.9.4";
+const CARD_VERSION = "0.9.5";
 
 const pad = (n) => String(n).padStart(2, "0");
 const minToHHMM = (m) => {
@@ -1009,8 +1009,8 @@ const STYLE = `
 
   /* Room header */
   .pcs-room { margin-bottom: 18px; }
-  .pcs-room-name { font-weight: 600; font-size: 1.05em; margin: 6px 0; display: flex; align-items: center; justify-content: space-between; gap: 8px; }
-  .pcs-room-name-text { display: flex; align-items: center; gap: 5px; }
+  .pcs-room-name { font-weight: 600; font-size: 1.05em; margin: 6px 0; display: flex; align-items: center; justify-content: space-between; gap: 8px 10px; flex-wrap: wrap; }
+  .pcs-room-name-text { display: flex; align-items: center; flex-wrap: wrap; gap: 5px; flex: 1 1 auto; min-width: 0; }
   .pcs-heat-icon { font-size: 1em; line-height: 1; }
   .pcs-cur-temp { font-weight: 400; font-size: .95em; opacity: .8; }
   .pcs-paused-badge { font-weight: 600; font-size: .7em; text-transform: uppercase; letter-spacing: .04em; padding: 1px 6px; border-radius: 8px; background: var(--warning-color, #d9a13b); color: #1c1c1c; }
@@ -1020,7 +1020,7 @@ const STYLE = `
   .pcs-mode-badge { font-weight: 600; font-size: .68em; text-transform: uppercase; letter-spacing: .04em; padding: 1px 6px; border-radius: 8px; margin-left: 8px; vertical-align: middle; }
   .pcs-mode-active { background: var(--error-color, #d9663b); color: #fff; }
   .pcs-mode-passive { background: var(--secondary-background-color, rgba(255,255,255,.1)); color: var(--secondary-text-color, #bbb); border: 1px solid var(--divider-color, #444); }
-  .pcs-room-actions { display: flex; align-items: center; gap: 6px; }
+  .pcs-room-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; margin-left: auto; justify-content: flex-end; }
   .pcs-room-move { display: inline-flex; gap: 2px; }
   .pcs-move-btn { padding: 2px 6px; line-height: 1; font-size: .8em; }
   .pcs-move-btn[disabled] { opacity: .3; cursor: default; }

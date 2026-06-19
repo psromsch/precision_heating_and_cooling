@@ -704,12 +704,32 @@ class PrecisionClimateCoordinator:
 
     # --- Presence mode -------------------------------------------------------
 
+    def _any_tracker_unavailable(self) -> bool:
+        """Return True if any configured person tracker is unavailable or unknown.
+
+        When a tracker can't be read, we have no reliable location data, so
+        presence evaluation is frozen — the current away state is held and the
+        grace timer is not started. Only a manual override can change the state
+        until all trackers come back online.
+        """
+        for person_eid in self.config.presence.persons:
+            state = self.hass.states.get(person_eid)
+            if state is None or state.state in (STATE_UNAVAILABLE, STATE_UNKNOWN):
+                return True
+        return False
+
     async def _async_evaluate_presence(self) -> None:
         cfg = self.config.presence
         if not cfg.enabled or not cfg.persons or not cfg.zone:
             return
         # Manual- and holiday-away are never overridden by presence.
         if self._away_source in ("manual", "holiday"):
+            return
+        # If any tracker is unavailable, freeze: cancel any pending grace timer
+        # (so away can't engage) and hold the current state until all trackers
+        # are readable again. Only manual override can change state in this window.
+        if self._any_tracker_unavailable():
+            self._cancel_grace_timer()
             return
 
         anyone_home = self._is_anyone_home()

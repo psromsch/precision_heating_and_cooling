@@ -75,6 +75,12 @@ _LOGGER = logging.getLogger(__name__)
 # the runtime sensors / handle period rollover) while nothing else triggers.
 RUNTIME_TICK = timedelta(minutes=5)
 
+# The TRV drift guard only corrects setpoints that have been stable this long.
+# A value that moved more recently is a human dialing the valve (boost) — the
+# guard must never snap the dial back mid-turn. Stale valves (the case the
+# guard exists for) sit at their value for far longer than this.
+TRV_DRIFT_GRACE_SECONDS = 180.0
+
 
 class PrecisionClimateCoordinator:
     """Owns the runtime state and drives the control loop."""
@@ -114,6 +120,9 @@ class PrecisionClimateCoordinator:
         self._trv_to_room: dict[str, str] = {
             trv: r.room_id for r in self.config.rooms for trv in r.trvs
         }
+        # monotonic timestamp of each TRV's last observed setpoint change, so
+        # the drift guard leaves recently-touched valves alone (live dialing).
+        self._trv_setpoint_changed_mono: dict[str, float] = {}
 
         # Commanded state (what we last told HA to do).
         self._boiler_on: bool = False
@@ -216,6 +225,20 @@ class PrecisionClimateCoordinator:
             src_data = await self._away_source_store.async_load()
             if isinstance(src_data, dict):
                 self._away_source = src_data.get("source")
+        # If away was engaged BY PRESENCE when HA stopped, hold it across the
+        # restart instead of silently dropping it (edge-triggered presence would
+        # otherwise never re-engage until the next real departure, heating an
+        # empty house). The presence evaluation at the end of setup disengages
+        # it immediately if someone is actually home.
+        if self._away_source == "presence":
+            p_cfg = self.config.presence
+            if p_cfg.enabled and p_cfg.persons and p_cfg.zone:
+                self._away_on = True
+                self._presence_home = False
+            else:
+                # Presence mode was disabled while away: don't strand away on.
+                self._away_source = None
+                self._save_away_source()
         # Restore the boiler runtime counters and re-anchor from the *real* boiler
         # state (downtime must not count as heating, so on_since starts fresh).
         if self._runtime_store is not None:
@@ -226,6 +249,11 @@ class PrecisionClimateCoordinator:
         )
         # Arm the holiday-away window (restart-safe; evaluates current state too).
         self._setup_holiday_schedule()
+        # Seed presence with reality: sets _presence_home to the current truth
+        # (so later edges are computed against a real baseline, not None) and
+        # disengages a restored presence-away if someone is already home.
+        # Takes no other action — engaging away still requires a real departure.
+        await self._async_evaluate_presence()
         # Trigger 4: startup safety check — force reality to match the logic.
         await self.async_evaluate()
 
@@ -352,8 +380,14 @@ class PrecisionClimateCoordinator:
         # Ignore non-setpoint attribute churn (e.g. current_temperature updates).
         if old_target is not None and abs(old_target - new_target) < 0.05:
             return
-        # Ignore our own valve commands (the force/block sentinels).
         entity_id = event.data.get("entity_id", "")
+        # Remember when this valve's setpoint last moved: the drift guard only
+        # corrects setpoints that have been SITTING STILL for a while, so a live
+        # human dialing the valve is never fought mid-turn (see
+        # _trv_setpoint_drifted). Recorded for our own commands too — harmless,
+        # since after a command the real value matches the sentinel anyway.
+        self._trv_setpoint_changed_mono[entity_id] = time.monotonic()
+        # Ignore our own valve commands (the force/block sentinels).
         if self._is_trv_sentinel(entity_id, new_target):
             return
         self.hass.async_create_task(self.async_set_room_boost(room_id, new_target))
@@ -380,6 +414,13 @@ class PrecisionClimateCoordinator:
         """
         real = self._trv_target(entity_id)
         if real is None:
+            return False
+        # A setpoint that moved in the last few minutes is a live human hand
+        # (a boost is being dialed, or its event is still in flight) — never
+        # correct it. Stale valves — the case this guard exists for — have been
+        # sitting at their value far longer than this grace.
+        changed = self._trv_setpoint_changed_mono.get(entity_id)
+        if changed is not None and time.monotonic() - changed < TRV_DRIFT_GRACE_SECONDS:
             return False
         intended = (
             self._trv_force_setpoint(entity_id)
@@ -561,6 +602,18 @@ class PrecisionClimateCoordinator:
         for cfg in self.config.rooms:
             want_open = decision.trv_open.get(cfg.room_id, self._trv_open.get(cfg.room_id, False))
             state_changed = want_open != self._trv_open.get(cfg.room_id)
+            # Boosted rooms: hands off the valve. The user just set it manually
+            # — rewriting it would snap the dial back to the closed sentinel
+            # mid-turn (the drift guard fires while the boost target is still
+            # below the room temperature) or yank it to the force sentinel the
+            # moment the dial crosses the room temperature. During boost the
+            # valve stays exactly where the user put it (their setpoint > room
+            # temp opens the valve on its own); we still run the boiler and the
+            # caches below. Sentinel discipline resumes when the boost expires.
+            if self._room_boost.get(cfg.room_id) is not None:
+                self._trv_open[cfg.room_id] = want_open
+                self._room_heating[cfg.room_id] = is_heating(self._boiler_on, want_open)
+                continue
             for trv in cfg.trvs:
                 # Command the valve when the desired state changed OR when its
                 # real setpoint has drifted from the sentinel we intend for it
@@ -815,6 +868,11 @@ class PrecisionClimateCoordinator:
 
     async def _async_engage_away_after_grace(self) -> None:
         # Re-check in case someone returned while the timer was running.
+        # Also re-check tracker availability: the freeze normally cancels this
+        # timer, but the expiry callback can race the queued freeze evaluation,
+        # and an unreadable tracker must never be interpreted as "not home".
+        if self._any_tracker_unavailable():
+            return
         if self._is_anyone_home():
             return
         if self._away_source in ("manual", "holiday"):

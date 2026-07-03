@@ -123,6 +123,10 @@ class PrecisionClimateCoordinator:
         # Away mode source tracking.
         self._away_source: str | None = None   # "manual" | "presence" | "holiday" | None
         self._grace_unsub = None               # async_call_later handle for the grace timer
+        # Last observed presence state (someone in the zone?). None until the first
+        # evaluation. Used to make presence edge-triggered: away engages only on a
+        # home→away transition, so a manual away-off while outside is respected.
+        self._presence_home: bool | None = None
         # Persisted so a restart can tell apart manual away (sticky) from
         # presence/holiday away (re-derived on boot, never restored from switch state).
         self._away_source_store: Store | None = (
@@ -734,13 +738,23 @@ class PrecisionClimateCoordinator:
 
         anyone_home = self._is_anyone_home()
 
+        # Edge-triggered: presence only acts on an actual transition, never on the
+        # steady state. This means turning away off manually while still outside
+        # the zone does NOT get re-engaged (no new home→away transition), and it
+        # won't fire on startup either. Away re-engages only the next time someone
+        # leaves the zone (which requires having returned home first).
+        was_home = self._presence_home
+        self._presence_home = anyone_home
+
         if anyone_home:
             # Cancel any pending grace timer and disengage presence-away immediately.
             self._cancel_grace_timer()
             if self._away_on and self._away_source == "presence":
                 await self._async_set_away_presence(False)
-        else:
-            # Nobody home: start grace timer if not already running and not already away.
+        elif was_home:
+            # Genuine home→away transition: start the grace timer if not already
+            # away and none pending. (was_home is None on the first evaluation, so
+            # startup-while-away never auto-engages — only a real departure does.)
             if not self._away_on and self._grace_unsub is None:
                 self._grace_unsub = async_call_later(
                     self.hass,
@@ -812,6 +826,16 @@ class PrecisionClimateCoordinator:
         self._away_on = on
         self._away_source = "presence" if on else None
         self._save_away_source()
+        if on:
+            self._notify(
+                "presence_away_on",
+                "Away mode ON — nobody is in the presence zone.",
+            )
+        else:
+            self._notify(
+                "presence_away_off",
+                "Away mode OFF — someone is back in the presence zone.",
+            )
         # Keep the HA away switch in sync.
         away_switch = self._away_switch_entity_id()
         if away_switch:

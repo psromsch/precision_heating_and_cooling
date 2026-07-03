@@ -75,6 +75,12 @@ _LOGGER = logging.getLogger(__name__)
 # the runtime sensors / handle period rollover) while nothing else triggers.
 RUNTIME_TICK = timedelta(minutes=5)
 
+# The TRV drift guard only corrects setpoints that have been stable this long.
+# A value that moved more recently is a human dialing the valve (boost) — the
+# guard must never snap the dial back mid-turn. Stale valves (the case the
+# guard exists for) sit at their value for far longer than this.
+TRV_DRIFT_GRACE_SECONDS = 180.0
+
 
 class PrecisionClimateCoordinator:
     """Owns the runtime state and drives the control loop."""
@@ -114,6 +120,9 @@ class PrecisionClimateCoordinator:
         self._trv_to_room: dict[str, str] = {
             trv: r.room_id for r in self.config.rooms for trv in r.trvs
         }
+        # monotonic timestamp of each TRV's last observed setpoint change, so
+        # the drift guard leaves recently-touched valves alone (live dialing).
+        self._trv_setpoint_changed_mono: dict[str, float] = {}
 
         # Commanded state (what we last told HA to do).
         self._boiler_on: bool = False
@@ -371,8 +380,14 @@ class PrecisionClimateCoordinator:
         # Ignore non-setpoint attribute churn (e.g. current_temperature updates).
         if old_target is not None and abs(old_target - new_target) < 0.05:
             return
-        # Ignore our own valve commands (the force/block sentinels).
         entity_id = event.data.get("entity_id", "")
+        # Remember when this valve's setpoint last moved: the drift guard only
+        # corrects setpoints that have been SITTING STILL for a while, so a live
+        # human dialing the valve is never fought mid-turn (see
+        # _trv_setpoint_drifted). Recorded for our own commands too — harmless,
+        # since after a command the real value matches the sentinel anyway.
+        self._trv_setpoint_changed_mono[entity_id] = time.monotonic()
+        # Ignore our own valve commands (the force/block sentinels).
         if self._is_trv_sentinel(entity_id, new_target):
             return
         self.hass.async_create_task(self.async_set_room_boost(room_id, new_target))
@@ -399,6 +414,13 @@ class PrecisionClimateCoordinator:
         """
         real = self._trv_target(entity_id)
         if real is None:
+            return False
+        # A setpoint that moved in the last few minutes is a live human hand
+        # (a boost is being dialed, or its event is still in flight) — never
+        # correct it. Stale valves — the case this guard exists for — have been
+        # sitting at their value far longer than this grace.
+        changed = self._trv_setpoint_changed_mono.get(entity_id)
+        if changed is not None and time.monotonic() - changed < TRV_DRIFT_GRACE_SECONDS:
             return False
         intended = (
             self._trv_force_setpoint(entity_id)

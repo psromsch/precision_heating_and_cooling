@@ -216,6 +216,20 @@ class PrecisionClimateCoordinator:
             src_data = await self._away_source_store.async_load()
             if isinstance(src_data, dict):
                 self._away_source = src_data.get("source")
+        # If away was engaged BY PRESENCE when HA stopped, hold it across the
+        # restart instead of silently dropping it (edge-triggered presence would
+        # otherwise never re-engage until the next real departure, heating an
+        # empty house). The presence evaluation at the end of setup disengages
+        # it immediately if someone is actually home.
+        if self._away_source == "presence":
+            p_cfg = self.config.presence
+            if p_cfg.enabled and p_cfg.persons and p_cfg.zone:
+                self._away_on = True
+                self._presence_home = False
+            else:
+                # Presence mode was disabled while away: don't strand away on.
+                self._away_source = None
+                self._save_away_source()
         # Restore the boiler runtime counters and re-anchor from the *real* boiler
         # state (downtime must not count as heating, so on_since starts fresh).
         if self._runtime_store is not None:
@@ -226,6 +240,11 @@ class PrecisionClimateCoordinator:
         )
         # Arm the holiday-away window (restart-safe; evaluates current state too).
         self._setup_holiday_schedule()
+        # Seed presence with reality: sets _presence_home to the current truth
+        # (so later edges are computed against a real baseline, not None) and
+        # disengages a restored presence-away if someone is already home.
+        # Takes no other action — engaging away still requires a real departure.
+        await self._async_evaluate_presence()
         # Trigger 4: startup safety check — force reality to match the logic.
         await self.async_evaluate()
 
@@ -815,6 +834,11 @@ class PrecisionClimateCoordinator:
 
     async def _async_engage_away_after_grace(self) -> None:
         # Re-check in case someone returned while the timer was running.
+        # Also re-check tracker availability: the freeze normally cancels this
+        # timer, but the expiry callback can race the queued freeze evaluation,
+        # and an unreadable tracker must never be interpreted as "not home".
+        if self._any_tracker_unavailable():
+            return
         if self._is_anyone_home():
             return
         if self._away_source in ("manual", "holiday"):

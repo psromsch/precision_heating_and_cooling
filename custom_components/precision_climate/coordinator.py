@@ -580,6 +580,18 @@ class PrecisionClimateCoordinator:
         for cfg in self.config.rooms:
             want_open = decision.trv_open.get(cfg.room_id, self._trv_open.get(cfg.room_id, False))
             state_changed = want_open != self._trv_open.get(cfg.room_id)
+            # Boosted rooms: hands off the valve. The user just set it manually
+            # — rewriting it would snap the dial back to the closed sentinel
+            # mid-turn (the drift guard fires while the boost target is still
+            # below the room temperature) or yank it to the force sentinel the
+            # moment the dial crosses the room temperature. During boost the
+            # valve stays exactly where the user put it (their setpoint > room
+            # temp opens the valve on its own); we still run the boiler and the
+            # caches below. Sentinel discipline resumes when the boost expires.
+            if self._room_boost.get(cfg.room_id) is not None:
+                self._trv_open[cfg.room_id] = want_open
+                self._room_heating[cfg.room_id] = is_heating(self._boiler_on, want_open)
+                continue
             for trv in cfg.trvs:
                 # Command the valve when the desired state changed OR when its
                 # real setpoint has drifted from the sentinel we intend for it

@@ -112,8 +112,9 @@ class RuntimeConfig:
     def boost_duration_hours(self) -> float:
         from ..const import CONF_BOOST_DURATION_HOURS, DEFAULT_BOOST_DURATION_HOURS
 
-        return float(
-            self.settings.get(CONF_BOOST_DURATION_HOURS, DEFAULT_BOOST_DURATION_HOURS)
+        return _safe_float(
+            self.settings.get(CONF_BOOST_DURATION_HOURS),
+            DEFAULT_BOOST_DURATION_HOURS,
         )
 
     def away_target(self, room_id: str) -> float | None:
@@ -127,6 +128,30 @@ class RuntimeConfig:
             return float(raw)
         except (ValueError, TypeError):
             return None
+
+
+def _safe_float(value, default: float) -> float:
+    """Coerce a settings value to float, falling back on garbage.
+
+    The settings dict is writable via the unvalidated ``set_settings`` service;
+    a bad value must never make ``build_runtime`` raise, because that bricks
+    entry setup on every reload/restart until storage is hand-edited.
+    """
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def _safe_int(value, default: int) -> int:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def _safe_list(value) -> list:
+    return list(value) if isinstance(value, (list, tuple, set)) else []
 
 
 def _parse_blocks(raw_blocks: dict) -> dict[str, list[ScheduleBlock]]:
@@ -194,7 +219,7 @@ def build_runtime(data: dict) -> RuntimeConfig:
     # its original relative position at the end. Both visual cards iterate this
     # ordering, so reordering here reorders the schedule card and history card
     # together. Control logic is order-independent, so this is purely cosmetic.
-    room_order = list(settings.get(CONF_ROOM_ORDER, []))
+    room_order = _safe_list(settings.get(CONF_ROOM_ORDER, []))
     if room_order:
         rank = {rid: i for i, rid in enumerate(room_order)}
         fallback = len(room_order)
@@ -203,9 +228,11 @@ def build_runtime(data: dict) -> RuntimeConfig:
 
     presence = PresenceConfig(
         enabled=bool(settings.get(CONF_PRESENCE_ENABLED, False)),
-        persons=list(settings.get(CONF_PRESENCE_PERSONS, [])),
+        persons=_safe_list(settings.get(CONF_PRESENCE_PERSONS, [])),
         zone=settings.get(CONF_PRESENCE_ZONE) or None,
-        grace_minutes=int(settings.get(CONF_PRESENCE_GRACE_MINUTES, DEFAULT_PRESENCE_GRACE_MINUTES)),
+        grace_minutes=_safe_int(
+            settings.get(CONF_PRESENCE_GRACE_MINUTES), DEFAULT_PRESENCE_GRACE_MINUTES
+        ),
     )
 
     return RuntimeConfig(

@@ -70,6 +70,7 @@ def _async_cleanup_orphan_entities(hass, entry, coordinator) -> None:
     for room in coordinator.config.rooms:
         valid.add(f"{entry_id}_{room.room_id}_target")
         valid.add(f"{entry_id}_{room.room_id}_heating")
+        valid.add(f"{entry_id}_{room.room_id}_active")
         valid.add(f"{entry_id}_{room.room_id}_pause")
 
     registry = er.async_get(hass)

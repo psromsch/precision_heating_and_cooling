@@ -274,10 +274,28 @@ class PrecisionClimateOptionsFlow(config_entries.OptionsFlow):
             room_id = self._editing_id or slugify(name) or f"room_{len(self._rooms) + 1}"
             existing = {r[CONF_ROOM_ID] for r in self._rooms if r[CONF_ROOM_ID] != self._editing_id}
 
+            # Cross-room uniqueness: the cards key rooms by NAME (a duplicate
+            # silently merges two rooms in the UI), and a TRV or thermometer
+            # shared by two rooms makes the control loop command the same valve
+            # with two conflicting decisions (perpetual flapping).
+            other_rooms = [r for r in self._rooms if r[CONF_ROOM_ID] != self._editing_id]
+            other_names = {r[CONF_ROOM_NAME].strip().lower() for r in other_rooms}
+            other_entities: set[str] = set()
+            for r in other_rooms:
+                other_entities.add(r[CONF_THERMOMETER])
+                other_entities.update(r.get(CONF_TRVS, []))
+            own_entities = [user_input[CONF_THERMOMETER], *user_input[CONF_TRVS]]
+
             if lower == 0 and upper == 0:
                 errors["base"] = "hysteresis_both_zero"
             elif room_id in existing:
                 errors["base"] = "duplicate_room"
+            elif not name:
+                errors["base"] = "empty_room_name"
+            elif name.lower() in other_names:
+                errors["base"] = "duplicate_room_name"
+            elif any(e in other_entities for e in own_entities):
+                errors["base"] = "entity_in_use"
             else:
                 # The schedule is no longer entered here. New rooms get a default
                 # full-day block; editing a room preserves its existing schedule

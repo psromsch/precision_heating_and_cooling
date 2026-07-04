@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from homeassistant.components.switch import SwitchEntity
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import STATE_ON
+from homeassistant.const import STATE_OFF, STATE_ON
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.restore_state import RestoreEntity
@@ -28,8 +28,12 @@ async def async_setup_entry(
     async_add_entities(entities)
 
 
-class MasterSwitch(PrecisionBaseEntity, SwitchEntity):
-    """Enables or disables the whole heating system."""
+class MasterSwitch(PrecisionBaseEntity, SwitchEntity, RestoreEntity):
+    """Enables or disables the whole heating system.
+
+    Restored across restarts: a system switched off for the season must not
+    silently re-enable (and start heating) just because HA rebooted.
+    """
 
     _attr_name = "Heating Master"
     _attr_icon = "mdi:radiator"
@@ -37,6 +41,13 @@ class MasterSwitch(PrecisionBaseEntity, SwitchEntity):
     def __init__(self, coordinator, entry_id: str) -> None:
         super().__init__(coordinator, entry_id)
         self._attr_unique_id = f"{entry_id}_master"
+
+    async def async_added_to_hass(self) -> None:
+        await super().async_added_to_hass()
+        last = await self.async_get_last_state()
+        # Default is ON; only an explicit OFF needs restoring.
+        if last is not None and last.state == STATE_OFF:
+            await self._coordinator.async_set_master(False)
 
     @property
     def is_on(self) -> bool:

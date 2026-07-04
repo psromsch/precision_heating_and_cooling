@@ -21,6 +21,7 @@ logic itself lives in the unit-tested ``control``, ``scheduler`` and
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import time
 from datetime import datetime, timedelta
@@ -28,6 +29,7 @@ from datetime import datetime, timedelta
 from homeassistant.const import (
     ATTR_ENTITY_ID,
     ATTR_TEMPERATURE,
+    STATE_OFF,
     STATE_ON,
     STATE_UNAVAILABLE,
     STATE_UNKNOWN,
@@ -114,8 +116,15 @@ class PrecisionClimateCoordinator:
         # Per-room boost: a manual TRV change overrides the schedule target AND
         # active/passive flag for a configured number of hours. Maps room_id ->
         # {"target": float, "expires": datetime (UTC)}. Each has an expiry timer.
+        # Persisted so a restart mid-boost doesn't snap the user's dialed valve
+        # back to the block sentinel (the hands-off contract survives reboots).
         self._room_boost: dict[str, dict] = {}
         self._boost_unsub: dict[str, object] = {}
+        self._boost_store: Store | None = (
+            Store(hass, 1, f"{DOMAIN}_{entry_id}_room_boost")
+            if entry_id is not None
+            else None
+        )
         # Map every TRV entity back to its room, for manual-change detection.
         self._trv_to_room: dict[str, str] = {
             trv: r.room_id for r in self.config.rooms for trv in r.trvs
@@ -123,6 +132,11 @@ class PrecisionClimateCoordinator:
         # monotonic timestamp of each TRV's last observed setpoint change, so
         # the drift guard leaves recently-touched valves alone (live dialing).
         self._trv_setpoint_changed_mono: dict[str, float] = {}
+
+        # Serializes control cycles: triggers fire evaluate via async_create_task
+        # and _apply awaits service calls mid-cycle, so overlapping evaluations
+        # could otherwise interleave and desync cached commanded state.
+        self._evaluate_lock = asyncio.Lock()
 
         # Commanded state (what we last told HA to do).
         self._boiler_on: bool = False
@@ -187,6 +201,12 @@ class PrecisionClimateCoordinator:
             for r in self.config.rooms
             for trv in r.trvs
         }
+        # Unauthorized-boiler must persist ~90 s before alerting: our own
+        # non-blocking turn-off leaves the state registry reading ON for a
+        # moment right after a pause/master-off.
+        self._unauthorized = SustainedCondition(90.0)
+        # Rooms whose overheat notification has fired (re-armed on recovery).
+        self._overheat_alerted: set[str] = set()
 
     # --- Lifecycle -----------------------------------------------------------
 
@@ -219,6 +239,9 @@ class PrecisionClimateCoordinator:
             data = await self._room_away_store.async_load()
             if isinstance(data, list):
                 self._room_away = set(data)
+        # Restore active boosts BEFORE the startup evaluation so a mid-boost
+        # restart doesn't rewrite the user's dialed valve to the block sentinel.
+        await self._restore_boosts()
         # Restore the away source so the away switch's restore path knows whether
         # the last active away was manual (sticky) or presence/holiday (re-derived).
         if self._away_source_store is not None:
@@ -243,7 +266,7 @@ class PrecisionClimateCoordinator:
         # state (downtime must not count as heating, so on_since starts fresh).
         if self._runtime_store is not None:
             self._runtime.restore(await self._runtime_store.async_load())
-        self._runtime.set_boiler(self._boiler_on, dt_util.utcnow())
+        self._runtime.set_boiler(self._boiler_on, dt_util.now())
         self._runtime_tick_unsub = async_track_time_interval(
             self.hass, self._handle_runtime_tick, RUNTIME_TICK
         )
@@ -307,7 +330,7 @@ class PrecisionClimateCoordinator:
             unsub()
         self._holiday_unsubs.clear()
         # Persist final runtime counters on the way out.
-        self._runtime.tick(dt_util.utcnow())
+        self._runtime.tick(dt_util.now())
         self._save_runtime()
 
     # --- Triggers ------------------------------------------------------------
@@ -505,7 +528,17 @@ class PrecisionClimateCoordinator:
     # --- Main evaluation -----------------------------------------------------
 
     async def async_evaluate(self) -> None:
-        """Run one full control cycle and apply the resulting decision."""
+        """Run one full control cycle and apply the resulting decision.
+
+        Serialized: every trigger fires this via async_create_task, and _apply
+        awaits service calls mid-cycle. Without the lock, two rapid sensor
+        events could interleave — the second reading stale cached boiler/TRV
+        state at its await points and issuing commands out of order.
+        """
+        async with self._evaluate_lock:
+            await self._async_evaluate_locked()
+
+    async def _async_evaluate_locked(self) -> None:
         now_local = dt_util.now()
         weekday = now_local.weekday()
         minute = now_local.hour * 60 + now_local.minute
@@ -587,7 +620,7 @@ class PrecisionClimateCoordinator:
         # Boiler.
         if decision.boiler_on != self._boiler_on:
             await self._set_switch(self.config.boiler_switch, decision.boiler_on)
-            self._runtime.set_boiler(decision.boiler_on, dt_util.utcnow())
+            self._runtime.set_boiler(decision.boiler_on, dt_util.now())
             self._save_runtime()
         elif not decision.boiler_on:
             # Drift guard: if our cache says OFF but the real switch is ON
@@ -595,6 +628,16 @@ class PrecisionClimateCoordinator:
             real = self.hass.states.get(self.config.boiler_switch)
             if real is not None and real.state == STATE_ON:
                 await self._set_switch(self.config.boiler_switch, False)
+        else:
+            # Reverse drift guard: cache and decision say ON but the real switch
+            # reads a definite OFF (e.g. someone toggled it off by hand while
+            # demand exists). Without this the house silently stops heating and
+            # the prolonged/unresponsive failsafes count against a cold boiler.
+            # Only a definite "off" triggers it — unavailable/unknown states
+            # must not cause a per-cycle command storm.
+            real = self.hass.states.get(self.config.boiler_switch)
+            if real is not None and real.state == STATE_OFF:
+                await self._set_switch(self.config.boiler_switch, True)
         self._boiler_on = decision.boiler_on
 
         # TRVs — use each valve's own min/max as open/close bounds so we never
@@ -643,10 +686,17 @@ class PrecisionClimateCoordinator:
         rooms_by_id = {r.room_id: r for r in rooms}
 
         # Unauthorized boiler: real switch on while nothing authorises it.
+        # Sustained (90 s) because our own turn-off commands are non-blocking:
+        # right after a pause/master-off the state registry still reads ON for
+        # a moment, which must not raise a false alarm. A genuinely rogue ON
+        # survives the window and still gets corrected + notified.
         real_boiler = self.hass.states.get(self.config.boiler_switch)
         real_on = real_boiler is not None and real_boiler.state == STATE_ON
         active_window = any(r.window_open for r in rooms if r.is_active)
-        if is_unauthorized_boiler(real_on, self.master_on, self.paused, active_window):
+        unauthorized = is_unauthorized_boiler(
+            real_on, self.master_on, self.paused, active_window
+        )
+        if self._unauthorized.update(mono, unauthorized):
             self.hass.async_create_task(self._set_switch(self.config.boiler_switch, False))
             self._notify("unauthorized_boiler", "Boiler was on without authorization; forced off.")
 
@@ -660,12 +710,18 @@ class PrecisionClimateCoordinator:
                 continue
             heating = self._room_heating.get(cfg.room_id, False)
 
-            # Overheating.
+            # Overheating — latched: notify once on the rising edge, re-arm only
+            # after the room stops overheating (otherwise every thermometer
+            # update while hot would fire another notification).
             if is_overheating(room.temperature, heating, DEFAULT_OVERHEAT_THRESHOLD):
-                self._notify(
-                    "overheating",
-                    f"{cfg.name} is overheating ({room.temperature}°C).",
-                )
+                if cfg.room_id not in self._overheat_alerted:
+                    self._overheat_alerted.add(cfg.room_id)
+                    self._notify(
+                        "overheating",
+                        f"{cfg.name} is overheating ({room.temperature}°C).",
+                    )
+            else:
+                self._overheat_alerted.discard(cfg.room_id)
 
             # TRV setpoint mismatch (any TRV in the room reading below schedule target).
             should_heat = heating
@@ -894,25 +950,12 @@ class PrecisionClimateCoordinator:
                 "presence_away_off",
                 "Away mode OFF — someone is back in the presence zone.",
             )
-        # Keep the HA away switch in sync.
-        away_switch = self._away_switch_entity_id()
-        if away_switch:
-            await self._set_switch(away_switch, on)
+        # The away switch entity reflects coordinator state via the listener
+        # update below. Do NOT sync it with a switch.turn_on/off service call:
+        # that round-trips through AwayModeSwitch.async_turn_on → async_set_away,
+        # which would re-label this automatic away as "manual" and strand it.
         await self.async_evaluate()
         self._notify_listeners()
-
-    def _away_switch_entity_id(self) -> str | None:
-        """Resolve our own away switch entity_id from the entity registry."""
-        from homeassistant.helpers import entity_registry as er
-        registry = er.async_get(self.hass)
-        entry_id = next(
-            (eid for eid, c in self.hass.data.get("precision_climate", {}).items()
-             if c is self),
-            None,
-        )
-        if entry_id is None:
-            return None
-        return registry.async_get_entity_id("switch", "precision_climate", f"{entry_id}_away")
 
     def _cancel_grace_timer(self) -> None:
         if self._grace_unsub is not None:
@@ -927,7 +970,7 @@ class PrecisionClimateCoordinator:
         full evaluation so time-based failsafes (prolonged heating, overheat,
         TRV unresponsive) advance even during long quiet periods with no sensor
         state changes."""
-        self._runtime.tick(dt_util.utcnow())
+        self._runtime.tick(dt_util.now())
         self._save_runtime()
         self.hass.async_create_task(self.async_evaluate())
 
@@ -938,7 +981,7 @@ class PrecisionClimateCoordinator:
 
     def boiler_runtime_hours(self, period: str) -> float:
         """Boiler on-time in hours for 'today' | 'week' | 'month'."""
-        return self._runtime.hours(period, dt_util.utcnow())
+        return self._runtime.hours(period, dt_util.now())
 
     # --- Holiday away (absolute start/end window) ----------------------------
 
@@ -1011,9 +1054,8 @@ class PrecisionClimateCoordinator:
             self._away_on = False
             self._away_source = None
         self._save_away_source()
-        away_switch = self._away_switch_entity_id()
-        if away_switch:
-            await self._set_switch(away_switch, on)
+        # Switch entity syncs via the listener update — never via a service
+        # call, which would re-label the source as "manual" (see presence path).
         await self.async_evaluate()
         self._notify_listeners()
         if not on:
@@ -1054,8 +1096,18 @@ class PrecisionClimateCoordinator:
             )
 
     async def async_set_away(self, on: bool, source: str = "manual") -> None:
+        # If the away switch entity is toggled while an automatic away is
+        # already engaged, the toggle must not silently re-label the source as
+        # "manual" — that would make presence/holiday away sticky forever
+        # (presence refuses to disengage manual away). Turning ON while already
+        # on keeps the existing automatic source; turning ON from off is a real
+        # manual action.
+        if on:
+            if not self._away_on:
+                self._away_source = source
+        else:
+            self._away_source = None
         self._away_on = on
-        self._away_source = "manual" if on else None
         self._save_away_source()
         # When manually disengaging, re-evaluate presence so it can re-engage
         # if still nobody home (allows presence to take back control).
@@ -1114,6 +1166,50 @@ class PrecisionClimateCoordinator:
         """Return {"target", "expires"} for a boosted room, or None."""
         return self._room_boost.get(room_id)
 
+    def _save_boosts(self) -> None:
+        if self._boost_store is not None:
+            self._boost_store.async_delay_save(
+                lambda: {
+                    rid: {
+                        "target": b["target"],
+                        "expires": b["expires"].isoformat(),
+                    }
+                    for rid, b in self._room_boost.items()
+                },
+                1,
+            )
+
+    async def _restore_boosts(self) -> None:
+        """Reload persisted boosts and re-arm their expiry timers.
+
+        Keeps the hands-off contract across restarts: a valve the user dialed
+        must not be snapped back to the block sentinel just because HA rebooted
+        mid-boost. Already-expired boosts are dropped.
+        """
+        if self._boost_store is None:
+            return
+        data = await self._boost_store.async_load()
+        if not isinstance(data, dict):
+            return
+        now = dt_util.utcnow()
+        known = {r.room_id for r in self.config.rooms}
+        for rid, raw in data.items():
+            if rid not in known or not isinstance(raw, dict):
+                continue
+            expires = dt_util.parse_datetime(str(raw.get("expires") or ""))
+            try:
+                target = float(raw.get("target"))
+            except (TypeError, ValueError):
+                continue
+            if expires is None or expires <= now:
+                continue
+            self._room_boost[rid] = {"target": target, "expires": expires}
+            self._boost_unsub[rid] = async_call_later(
+                self.hass,
+                (expires - now).total_seconds(),
+                self._make_boost_expiry(rid),
+            )
+
     async def async_set_room_boost(self, room_id: str, target: float) -> None:
         """Boost a room to ``target`` for the configured duration, (re)starting
         the timer. Re-calling refreshes both the target and the expiry."""
@@ -1126,12 +1222,14 @@ class PrecisionClimateCoordinator:
         self._boost_unsub[room_id] = async_call_later(
             self.hass, hours * 3600.0, self._make_boost_expiry(room_id)
         )
+        self._save_boosts()
         await self.async_evaluate()
 
     async def async_cancel_room_boost(self, room_id: str) -> None:
         """End a room's boost immediately and return it to its schedule."""
         self._room_boost.pop(room_id, None)
         self._cancel_boost_timer(room_id)
+        self._save_boosts()
         await self.async_evaluate()
 
     def _make_boost_expiry(self, room_id: str):
@@ -1149,10 +1247,14 @@ class PrecisionClimateCoordinator:
 
     def _prune_expired_boosts(self) -> None:
         now = dt_util.utcnow()
+        pruned = False
         for rid in list(self._room_boost):
             if self._room_boost[rid]["expires"] <= now:
                 self._room_boost.pop(rid, None)
                 self._cancel_boost_timer(rid)
+                pruned = True
+        if pruned:
+            self._save_boosts()
 
     @property
     def room_heating(self) -> dict[str, bool]:

@@ -15,6 +15,9 @@
     },
     "error": {
       "duplicate_room": "A room with that name already exists.",
+      "duplicate_room_name": "Another room already uses that name.",
+      "empty_room_name": "The room name cannot be empty.",
+      "entity_in_use": "The thermometer or a TRV is already assigned to another room.",
       "hysteresis_both_zero": "At least one of the upper/lower hysteresis values must be greater than 0.",
       "schedule_parse": "Could not parse the schedule: {detail}",
       "schedule_coverage": "The schedule must cover the whole day with no gaps: {detail}",
@@ -103,6 +106,9 @@
     },
     "error": {
       "duplicate_room": "A room with that name already exists.",
+      "duplicate_room_name": "Another room already uses that name.",
+      "empty_room_name": "The room name cannot be empty.",
+      "entity_in_use": "The thermometer or a TRV is already assigned to another room.",
       "hysteresis_both_zero": "At least one of the upper/lower hysteresis values must be greater than 0.",
       "schedule_parse": "Could not parse the schedule: {detail}",
       "schedule_coverage": "The schedule must cover the whole day with no gaps: {detail}",

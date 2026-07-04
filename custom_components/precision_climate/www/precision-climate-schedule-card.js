@@ -30,7 +30,14 @@ const DAY_ORDER = ["all", "weekday", "weekend", "mon", "tue", "wed", "thu", "fri
 
 // Shown in the card footer so you can confirm which card version is live
 // after a HACS update (keep in sync with manifest.json).
-const CARD_VERSION = "0.9.5";
+const CARD_VERSION = "0.9.6";
+
+// Escape user-controlled strings (room/zone/person names, error messages)
+// before interpolating into innerHTML — markup in a name must render as text.
+const esc = (s) =>
+  String(s == null ? "" : s).replace(/[&<>"']/g, (c) => ({
+    "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;",
+  }[c]));
 
 const pad = (n) => String(n).padStart(2, "0");
 const minToHHMM = (m) => {
@@ -503,7 +510,7 @@ class PrecisionClimateScheduleCard extends HTMLElement {
         <div class="pcs-settings-head">
           <span class="pcs-room-name">⚙ Global configuration</span>
         </div>
-        ${this._error ? `<div class="pcs-error">${this._error}</div>` : ""}
+        ${this._error ? `<div class="pcs-error">${esc(this._error)}</div>` : ""}
         <div class="pcs-tabbar">${tabBar}</div>
         <div class="pcs-tab-body">${this._renderSettingsTab()}</div>
         <div class="pcs-actions">
@@ -536,7 +543,7 @@ class PrecisionClimateScheduleCard extends HTMLElement {
         .map(
           (r) => `
         <div class="pcs-field pcs-away-field">
-          <label>${r.name}</label>
+          <label>${esc(r.name)}</label>
           <input class="pcs-in pcs-away-target" data-room="${r.room_id}" type="number"
             min="5" max="25" step="0.1" value="${Number((d.away_targets || {})[r.room_id] ?? 16)}">
         </div>`
@@ -577,13 +584,13 @@ class PrecisionClimateScheduleCard extends HTMLElement {
           const entities = (d.child_lock_entities || {})[r.room_id] || [];
           if (!entities.length) {
             return `<div class="pcs-field pcs-childlock-field">
-              <label>${r.name}</label>
+              <label>${esc(r.name)}</label>
               <span class="pcs-childlock-none">no child-lock entity configured</span>
             </div>`;
           }
           const on = !!(d.child_lock_on || {})[r.room_id];
           return `<div class="pcs-field pcs-childlock-field">
-            <label>${r.name}</label>
+            <label>${esc(r.name)}</label>
             <button class="pcs-btn pcs-childlock-toggle ${on ? "pcs-primary" : ""}"
               data-childlock="${r.room_id}" data-want="${on ? "0" : "1"}">
               ${on ? "🔒 Locked" : "🔓 Unlocked"}</button>
@@ -611,7 +618,7 @@ class PrecisionClimateScheduleCard extends HTMLElement {
         .map((id) => {
           const name = (this._hass.states[id].attributes.friendly_name || id);
           const sel = id === (d.presence_zone || "") ? " selected" : "";
-          return `<option value="${id}"${sel}>${name} (${id})</option>`;
+          return `<option value="${id}"${sel}>${esc(name)} (${id})</option>`;
         })
         .join("");
       const zoneNone = !d.presence_zone ? " selected" : "";
@@ -629,7 +636,7 @@ class PrecisionClimateScheduleCard extends HTMLElement {
         .map((id) => {
           const name = (this._hass.states[id].attributes.friendly_name || id);
           const sel = selectedPersons.has(id) ? " selected" : "";
-          return `<option value="${id}"${sel}>${name} (${id})</option>`;
+          return `<option value="${id}"${sel}>${esc(name)} (${id})</option>`;
         })
         .join("");
       const personSelect = `<select class="pcs-in pcs-presence-persons-select" multiple size="${Math.min(Math.max(personIds.length, 2), 5)}">
@@ -839,7 +846,7 @@ class PrecisionClimateScheduleCard extends HTMLElement {
 
     return `<div class="pcs-room${paused ? " pcs-room-paused" : ""}${boosted ? " pcs-room-boosted" : ""}${roomAway ? " pcs-room-away" : ""}">
       <div class="pcs-room-name">
-        <span class="pcs-room-name-text">${room.name}${modeBadge}${heatIcon}${tempSpan}${pausedBadge}${boostBadge}${roomAwayBadge}</span>
+        <span class="pcs-room-name-text">${esc(room.name)}${modeBadge}${heatIcon}${tempSpan}${pausedBadge}${boostBadge}${roomAwayBadge}</span>
         <span class="pcs-room-actions">${moveBtns}${boostBtn}${roomAwayBtn}${pauseBtn}</span>
       </div>
       ${days}
@@ -871,8 +878,8 @@ class PrecisionClimateScheduleCard extends HTMLElement {
       .join("");
     return `
       <div class="pcs-editor">
-        <div class="pcs-room-name">${room ? room.name : e.room_id} — ${DAY_LABELS[e.day_key] || e.day_key}</div>
-        ${this._error ? `<div class="pcs-error">${this._error}</div>` : ""}
+        <div class="pcs-room-name">${esc(room ? room.name : e.room_id)} — ${DAY_LABELS[e.day_key] || e.day_key}</div>
+        ${this._error ? `<div class="pcs-error">${esc(this._error)}</div>` : ""}
         <table class="pcs-table">
           <thead><tr><th>Start</th><th>End</th><th>°C</th><th>Active</th><th></th></tr></thead>
           <tbody>${rows}</tbody>

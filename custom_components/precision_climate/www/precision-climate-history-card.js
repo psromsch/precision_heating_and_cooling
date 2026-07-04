@@ -23,7 +23,7 @@
  * No build step, no external dependencies.
  */
 
-const HISTORY_CARD_VERSION = "0.9.9";
+const HISTORY_CARD_VERSION = "0.9.10";
 
 // Per-room line colours, assigned round-robin in discovery order.
 const ROOM_COLORS = [
@@ -31,6 +31,14 @@ const ROOM_COLORS = [
 ];
 
 const pad = (n) => String(n).padStart(2, "0");
+
+// Escape user-controlled strings (room names, error messages) before
+// interpolating into innerHTML — a room named with markup must render as
+// text, never execute.
+const esc = (s) =>
+  String(s == null ? "" : s).replace(/[&<>"']/g, (c) => ({
+    "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;",
+  }[c]));
 
 class PrecisionClimateHistoryCard extends HTMLElement {
   setConfig(config) {
@@ -94,8 +102,11 @@ class PrecisionClimateHistoryCard extends HTMLElement {
     const ids = this._entityIds(status);
     if (!ids.length) return;
     // Throttle: only refetch on demand, on (re)connect, or every ~60s.
+    // Keyed on _lastFetch alone (set before the request below) so a FAILING
+    // fetch is throttled too — otherwise a broken recorder would trigger a
+    // retry on every state change in HA, forever.
     const now = Date.now();
-    if (!force && this._history && now - this._lastFetch < 55000) return;
+    if (!force && now - this._lastFetch < 55000) return;
 
     this._loading = true;
     this._lastFetch = now;
@@ -173,7 +184,7 @@ class PrecisionClimateHistoryCard extends HTMLElement {
     const t0 = now - this._hours * 3600 * 1000;
 
     let html = "";
-    if (this._error) html += `<div class="pch-error">${this._error}</div>`;
+    if (this._error) html += `<div class="pch-error">${esc(this._error)}</div>`;
     if (!this._history && this._loading) html += `<div class="pch-empty">Loading history…</div>`;
 
     // Optional boiler strip.
@@ -219,7 +230,7 @@ class PrecisionClimateHistoryCard extends HTMLElement {
     // to the away temperature, which already shows it.)
     const allV = [...tempPts.map((p) => p.v), ...targetPts.map((p) => p.v)];
     if (!allV.length) {
-      return `<div class="pch-room"><div class="pch-room-head"><span class="pch-dot" style="background:${color}"></span>${name}</div><div class="pch-nodata">No data in the last ${this._hours}h.</div></div>`;
+      return `<div class="pch-room"><div class="pch-room-head"><span class="pch-dot" style="background:${color}"></span>${esc(name)}</div><div class="pch-nodata">No data in the last ${this._hours}h.</div></div>`;
     }
     let lo = Math.min(...allV);
     let hi = Math.max(...allV);
@@ -300,7 +311,7 @@ class PrecisionClimateHistoryCard extends HTMLElement {
     return `
       <div class="pch-room">
         <div class="pch-room-head">
-          <span><span class="pch-dot" style="background:${color}"></span>${name}${modeBadge}</span>
+          <span><span class="pch-dot" style="background:${color}"></span>${esc(name)}${modeBadge}</span>
           <span class="pch-stats">${stats}</span>
         </div>
         <div class="pch-chart-wrap">

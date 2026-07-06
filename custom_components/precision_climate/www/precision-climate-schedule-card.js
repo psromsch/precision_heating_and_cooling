@@ -30,7 +30,7 @@ const DAY_ORDER = ["all", "weekday", "weekend", "mon", "tue", "wed", "thu", "fri
 
 // Shown in the card footer so you can confirm which card version is live
 // after a HACS update (keep in sync with manifest.json).
-const CARD_VERSION = "0.9.7";
+const CARD_VERSION = "0.9.8";
 
 // Escape user-controlled strings (room/zone/person names, error messages)
 // before interpolating into innerHTML — markup in a name must render as text.
@@ -775,7 +775,18 @@ class PrecisionClimateScheduleCard extends HTMLElement {
     const heatIcon = heating ? `<span class="pcs-heat-icon" title="Heating">🔥</span>` : "";
     const tempSpan = temp ? `<span class="pcs-cur-temp">(${temp})</span>` : "";
     const isActive = info.active === true;
-    const modeBadge = `<span class="pcs-mode-badge ${isActive ? "pcs-mode-active" : "pcs-mode-passive"}" title="${isActive ? "Active: heats as soon as it falls below target" : "Passive: never calls the boiler, but heats along with it (rides) whenever it is already on for an active room"}">${isActive ? "active" : "passive"}</span>`;
+    // A room with an occupancy sensor has its active/passive flag driven by
+    // presence, not the schedule, so the timeline is rendered neutrally
+    // (targets only). The header badge still shows the live active/passive
+    // state plus a 👤 marker and the confirmed occupancy.
+    const hasPresence = info.has_presence === true;
+    const presenceState = info.presence_state || null;
+    const presTitle = presenceState
+      ? `Occupancy-controlled — currently ${presenceState} (${isActive ? "active" : "passive"})`
+      : "Occupancy-controlled — awaiting a confirmed reading";
+    const modeBadge = hasPresence
+      ? `<span class="pcs-mode-badge ${isActive ? "pcs-mode-active" : "pcs-mode-passive"}" title="${presTitle}">👤 ${isActive ? "active" : "passive"}</span>`
+      : `<span class="pcs-mode-badge ${isActive ? "pcs-mode-active" : "pcs-mode-passive"}" title="${isActive ? "Active: heats as soon as it falls below target" : "Passive: never calls the boiler, but heats along with it (rides) whenever it is already on for an active room"}">${isActive ? "active" : "passive"}</span>`;
     const paused = !!info.paused;
     const pausedBadge = paused ? `<span class="pcs-paused-badge">paused</span>` : "";
     const pauseBtn = `<button class="pcs-btn pcs-pause-btn ${paused ? "pcs-resume" : ""}" data-pause="${room.room_id}|${paused ? "0" : "1"}" title="${paused ? "Resume room" : "Pause room (target 5°C until resumed)"}">${paused ? "▶ Resume" : "⏸ Pause"}</button>`;
@@ -817,9 +828,13 @@ class PrecisionClimateScheduleCard extends HTMLElement {
         const segs = blocks
           .map((b) => {
             const w = ((b.end_min - b.start_min) / 1440) * 100;
-            const cls = b.is_active ? "active" : "passive";
+            // Presence rooms: neutral segment (active/passive is dynamic), show
+            // only the target. Others keep the active/passive colouring.
+            const cls = hasPresence ? "presence" : b.is_active ? "active" : "passive";
             const timeRange = `${minToHHMM(b.start_min)}–${minToHHMM(b.end_min)}`;
-            const tooltip = `${b.target}°C (${timeRange}) ${b.is_active ? "active" : "passive"}`;
+            const tooltip = hasPresence
+              ? `${b.target}°C (${timeRange}) — active/passive set by occupancy`
+              : `${b.target}°C (${timeRange}) ${b.is_active ? "active" : "passive"}`;
             return `<div class="pcs-seg ${cls}" style="width:${w.toFixed(4)}%" title="${tooltip}">
               <span class="pcs-seg-label">${b.target}°<br><span class="pcs-seg-time">${timeRange}</span></span>
             </div>`;
@@ -1061,6 +1076,8 @@ const STYLE = `
   }
   .pcs-seg.active  { background: var(--error-color, #d9663b); }
   .pcs-seg.passive { background: var(--primary-color, #3b78d9); opacity: .55; }
+  /* Occupancy-controlled rooms: neutral grey (active/passive is dynamic). */
+  .pcs-seg.presence { background: var(--secondary-text-color, #6b7280); opacity: .5; }
   .pcs-seg-label { display: flex; flex-direction: column; align-items: center; font-size: .9em; color: #fff; line-height: 1.25; pointer-events: none; }
   .pcs-seg-time { font-size: .85em; opacity: .85; }
 

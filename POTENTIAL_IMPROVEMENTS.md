@@ -87,21 +87,19 @@ understands why heating is off.
 
 ---
 
-## 4. Per-room presence sensor (entity-based room occupancy)
+## 4. Per-room presence sensor (entity-based room occupancy) — ✅ IMPLEMENTED (v1.3.0)
 
-**Idea:** Allow selecting a presence sensor (binary, e.g. a mmWave radar) per
-room in the room config. When the room is unoccupied, apply the room's away
-temperature automatically (without affecting other rooms).
+**Shipped** as a richer version of the original idea. Each room can take an
+optional occupancy sensor (`presence_entity`, e.g. a mmWave radar) with:
+- `presence_on_minutes` / `presence_off_minutes` — dwell/clearance to debounce
+  both edges (a brief walk-through or a momentary sensor drop won't flip it),
+- `present_action` ∈ {active, passive} — what occupancy does,
+- `absent_action` ∈ {passive, away} — what vacancy does.
 
-**Why parked:** Requires a per-room binary_sensor entity selector in the room
-config flow UI, plus logic to distinguish per-room away from global away.
-Adds complexity to an already multi-layered away-mode system.
-
-**If revisited:** add `presence_entity` to room config; when its state is `off`,
-treat the room as individually away (capped to `away_target`); restore when
-state returns to `on`. No learning, fully reactive — fits the obedience
-philosophy. Lower priority than the global zone-based presence that's already
-implemented.
+Presence overrides the schedule's active/passive flag (occupied → present
+action, vacant → absent action). "Away = passive" is enforced globally (a
+per-room-away room never fires the boiler), with whole-system away the sole
+exception. Fully reactive, no learning. See `control/mode.resolve_room_mode`.
 
 ---
 

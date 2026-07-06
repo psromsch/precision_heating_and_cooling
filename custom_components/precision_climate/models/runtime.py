@@ -25,7 +25,12 @@ from ..const import (
     CONF_PRESENCE_GRACE_MINUTES,
     CONF_PRESENCE_PERSONS,
     CONF_PRESENCE_ZONE,
+    CONF_ROOM_ABSENT_ACTION,
     CONF_ROOM_ID,
+    CONF_ROOM_PRESENCE_ENTITY,
+    CONF_ROOM_PRESENCE_OFF_MINUTES,
+    CONF_ROOM_PRESENCE_ON_MINUTES,
+    CONF_ROOM_PRESENT_ACTION,
     CONF_ROOM_NAME,
     CONF_ROOM_ORDER,
     CONF_ROOMS,
@@ -42,9 +47,15 @@ from ..const import (
     CONF_TRVS,
     CONF_UPPER_HYSTERESIS,
     CONF_WINDOWS,
+    ABSENT_ACTION_AWAY,
+    ABSENT_ACTION_PASSIVE,
     DEFAULT_PRESENCE_GRACE_MINUTES,
+    DEFAULT_ROOM_PRESENCE_OFF_MINUTES,
+    DEFAULT_ROOM_PRESENCE_ON_MINUTES,
     DEFAULT_SUNNY_END_MIN,
     DEFAULT_SUNNY_TARGET,
+    PRESENT_ACTION_ACTIVE,
+    PRESENT_ACTION_PASSIVE,
 )
 from .schedule import RoomSchedule, ScheduleBlock, ScheduleMode
 
@@ -62,11 +73,21 @@ class RoomConfig:
     upper_hysteresis: float = 0.5
     # Optional child-lock entity per TRV: {trv_entity_id: child_lock_entity_id}.
     child_locks: dict[str, str] = field(default_factory=dict)
+    # Optional per-room presence (occupancy) sensor + dwell/action config.
+    presence_entity: str | None = None
+    presence_on_minutes: float = 3.0
+    presence_off_minutes: float = 5.0
+    present_action: str = "active"   # "active" | "passive"
+    absent_action: str = "passive"   # "passive" | "away"
 
     @property
     def child_lock_entities(self) -> list[str]:
         """The configured child-lock entity_ids for this room's TRVs."""
         return [self.child_locks[t] for t in self.trvs if self.child_locks.get(t)]
+
+    @property
+    def has_presence(self) -> bool:
+        return bool(self.presence_entity)
 
 
 @dataclass
@@ -176,6 +197,12 @@ def build_runtime(data: dict) -> RuntimeConfig:
 
     for raw in data.get(CONF_ROOMS, []):
         room_id = raw[CONF_ROOM_ID]
+        present_action = raw.get(CONF_ROOM_PRESENT_ACTION, PRESENT_ACTION_ACTIVE)
+        if present_action not in (PRESENT_ACTION_ACTIVE, PRESENT_ACTION_PASSIVE):
+            present_action = PRESENT_ACTION_ACTIVE
+        absent_action = raw.get(CONF_ROOM_ABSENT_ACTION, ABSENT_ACTION_PASSIVE)
+        if absent_action not in (ABSENT_ACTION_PASSIVE, ABSENT_ACTION_AWAY):
+            absent_action = ABSENT_ACTION_PASSIVE
         rooms.append(
             RoomConfig(
                 room_id=room_id,
@@ -186,6 +213,17 @@ def build_runtime(data: dict) -> RuntimeConfig:
                 lower_hysteresis=float(raw.get(CONF_LOWER_HYSTERESIS, 0.5)),
                 upper_hysteresis=float(raw.get(CONF_UPPER_HYSTERESIS, 0.5)),
                 child_locks=dict(raw.get(CONF_CHILD_LOCKS, {})),
+                presence_entity=raw.get(CONF_ROOM_PRESENCE_ENTITY) or None,
+                presence_on_minutes=_safe_float(
+                    raw.get(CONF_ROOM_PRESENCE_ON_MINUTES),
+                    DEFAULT_ROOM_PRESENCE_ON_MINUTES,
+                ),
+                presence_off_minutes=_safe_float(
+                    raw.get(CONF_ROOM_PRESENCE_OFF_MINUTES),
+                    DEFAULT_ROOM_PRESENCE_OFF_MINUTES,
+                ),
+                present_action=present_action,
+                absent_action=absent_action,
             )
         )
         schedules.append(

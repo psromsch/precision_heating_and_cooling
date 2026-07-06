@@ -32,8 +32,13 @@ from .const import (
     CONF_LOWER_HYSTERESIS,
     CONF_NOTIFICATIONS,
     CONF_NOTIFY_SERVICES,
+    CONF_ROOM_ABSENT_ACTION,
     CONF_ROOM_ID,
     CONF_ROOM_NAME,
+    CONF_ROOM_PRESENCE_ENTITY,
+    CONF_ROOM_PRESENCE_OFF_MINUTES,
+    CONF_ROOM_PRESENCE_ON_MINUTES,
+    CONF_ROOM_PRESENT_ACTION,
     CONF_ROOMS,
     CONF_SCHEDULE_BLOCKS,
     CONF_SCHEDULE_MODE,
@@ -48,9 +53,15 @@ from .const import (
     CONF_TRVS,
     CONF_UPPER_HYSTERESIS,
     CONF_WINDOWS,
+    ABSENT_ACTION_AWAY,
+    ABSENT_ACTION_PASSIVE,
+    DEFAULT_ROOM_PRESENCE_OFF_MINUTES,
+    DEFAULT_ROOM_PRESENCE_ON_MINUTES,
     DEFAULT_SUNNY_END_MIN,
     DEFAULT_SUNNY_TARGET,
     DOMAIN,
+    PRESENT_ACTION_ACTIVE,
+    PRESENT_ACTION_PASSIVE,
 )
 from .models.schedule import (
     DAY_KEYS_PER_DAY,
@@ -103,6 +114,14 @@ def _temp_number():
     return selector.NumberSelector(
         selector.NumberSelectorConfig(
             min=5.0, max=25.0, step=0.1, mode="box", unit_of_measurement="°C"
+        )
+    )
+
+
+def _minutes_number():
+    return selector.NumberSelector(
+        selector.NumberSelectorConfig(
+            min=0.0, max=120.0, step=1.0, mode="box", unit_of_measurement="min"
         )
     )
 
@@ -169,6 +188,46 @@ def _room_schema(defaults: dict | None = None) -> vol.Schema:
                     translation_key="schedule_mode",
                 )
             ),
+            # Optional per-room occupancy sensor. When set, presence overrides
+            # the schedule's active/passive flag (see the presence action
+            # selectors). EntitySelector rejects an empty-string default, so we
+            # only add a default when one exists.
+            **(
+                {
+                    vol.Optional(
+                        CONF_ROOM_PRESENCE_ENTITY,
+                        default=d[CONF_ROOM_PRESENCE_ENTITY],
+                    ): _entity_picker("binary_sensor")
+                }
+                if d.get(CONF_ROOM_PRESENCE_ENTITY)
+                else {vol.Optional(CONF_ROOM_PRESENCE_ENTITY): _entity_picker("binary_sensor")}
+            ),
+            vol.Required(
+                CONF_ROOM_PRESENT_ACTION,
+                default=d.get(CONF_ROOM_PRESENT_ACTION, PRESENT_ACTION_ACTIVE),
+            ): selector.SelectSelector(
+                selector.SelectSelectorConfig(
+                    options=[PRESENT_ACTION_ACTIVE, PRESENT_ACTION_PASSIVE],
+                    translation_key="present_action",
+                )
+            ),
+            vol.Required(
+                CONF_ROOM_ABSENT_ACTION,
+                default=d.get(CONF_ROOM_ABSENT_ACTION, ABSENT_ACTION_PASSIVE),
+            ): selector.SelectSelector(
+                selector.SelectSelectorConfig(
+                    options=[ABSENT_ACTION_PASSIVE, ABSENT_ACTION_AWAY],
+                    translation_key="absent_action",
+                )
+            ),
+            vol.Required(
+                CONF_ROOM_PRESENCE_ON_MINUTES,
+                default=d.get(CONF_ROOM_PRESENCE_ON_MINUTES, DEFAULT_ROOM_PRESENCE_ON_MINUTES),
+            ): _minutes_number(),
+            vol.Required(
+                CONF_ROOM_PRESENCE_OFF_MINUTES,
+                default=d.get(CONF_ROOM_PRESENCE_OFF_MINUTES, DEFAULT_ROOM_PRESENCE_OFF_MINUTES),
+            ): _minutes_number(),
         }
     )
 
@@ -334,6 +393,19 @@ class PrecisionClimateOptionsFlow(config_entries.OptionsFlow):
                     CONF_SCHEDULE_MODE: user_input[CONF_SCHEDULE_MODE],
                     CONF_SCHEDULE_BLOCKS: blocks_by_day,
                     CONF_CHILD_LOCKS: child_locks,
+                    CONF_ROOM_PRESENCE_ENTITY: user_input.get(CONF_ROOM_PRESENCE_ENTITY) or "",
+                    CONF_ROOM_PRESENT_ACTION: user_input.get(
+                        CONF_ROOM_PRESENT_ACTION, PRESENT_ACTION_ACTIVE
+                    ),
+                    CONF_ROOM_ABSENT_ACTION: user_input.get(
+                        CONF_ROOM_ABSENT_ACTION, ABSENT_ACTION_PASSIVE
+                    ),
+                    CONF_ROOM_PRESENCE_ON_MINUTES: user_input.get(
+                        CONF_ROOM_PRESENCE_ON_MINUTES, DEFAULT_ROOM_PRESENCE_ON_MINUTES
+                    ),
+                    CONF_ROOM_PRESENCE_OFF_MINUTES: user_input.get(
+                        CONF_ROOM_PRESENCE_OFF_MINUTES, DEFAULT_ROOM_PRESENCE_OFF_MINUTES
+                    ),
                 }
                 # Replace if editing, else append.
                 self._rooms = [

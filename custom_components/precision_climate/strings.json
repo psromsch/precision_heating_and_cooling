@@ -48,11 +48,18 @@
           "windows": "Window sensors (optional)",
           "lower_hysteresis": "Lower hysteresis (°C below target)",
           "upper_hysteresis": "Upper hysteresis (°C above target)",
-          "schedule_mode": "Schedule mode"
+          "schedule_mode": "Schedule mode",
+          "presence_entity": "Occupancy sensor (optional)",
+          "present_action": "When occupied, the room becomes",
+          "absent_action": "When vacant, the room becomes",
+          "presence_on_minutes": "Occupied for this long before it takes effect",
+          "presence_off_minutes": "Vacant for this long before it takes effect"
         },
         "data_description": {
           "lower_hysteresis": "How far below target an active room drops before calling the boiler.",
-          "upper_hysteresis": "How far above target before the room's TRV closes."
+          "upper_hysteresis": "How far above target before the room's TRV closes.",
+          "presence_entity": "A binary/occupancy sensor (e.g. mmWave). When set, occupancy overrides the schedule's active/passive flag for this room.",
+          "absent_action": "\"Away\" caps the room to its away target and makes it passive."
         }
       },
       "room_created": {
@@ -130,6 +137,18 @@
       "options": {
         "edit": "Edit",
         "delete": "Delete"
+      }
+    },
+    "present_action": {
+      "options": {
+        "active": "Active (fires the boiler when below target)",
+        "passive": "Passive (only rides the boiler when it is already on)"
+      }
+    },
+    "absent_action": {
+      "options": {
+        "passive": "Passive (rides the boiler only)",
+        "away": "Away (capped to the away target, passive)"
       }
     }
   }

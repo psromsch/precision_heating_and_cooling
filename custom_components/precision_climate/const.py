@@ -103,6 +103,23 @@ CONF_PRESENCE_ZONE = "presence_zone"         # zone entity_id e.g. zone.santiago
 CONF_PRESENCE_GRACE_MINUTES = "presence_grace_minutes"
 DEFAULT_PRESENCE_GRACE_MINUTES = 10
 
+# Per-room presence (occupancy) sensor. Optional per room. When set, occupancy
+# overrides the schedule's active/passive flag: while occupied the room takes
+# `present_action`, while vacant it takes `absent_action`. Dwell timers debounce
+# both edges so a brief walk-through or a momentary sensor drop doesn't flip the
+# room. Purely reactive — no learning.
+CONF_ROOM_PRESENCE_ENTITY = "presence_entity"        # binary_sensor entity_id
+CONF_ROOM_PRESENCE_ON_MINUTES = "presence_on_minutes"    # continuous presence to confirm
+CONF_ROOM_PRESENCE_OFF_MINUTES = "presence_off_minutes"  # continuous absence to confirm
+CONF_ROOM_PRESENT_ACTION = "present_action"          # "active" | "passive"
+CONF_ROOM_ABSENT_ACTION = "absent_action"            # "passive" | "away"
+DEFAULT_ROOM_PRESENCE_ON_MINUTES = 3
+DEFAULT_ROOM_PRESENCE_OFF_MINUTES = 5
+PRESENT_ACTION_ACTIVE = "active"
+PRESENT_ACTION_PASSIVE = "passive"
+ABSENT_ACTION_PASSIVE = "passive"
+ABSENT_ACTION_AWAY = "away"
+
 # Holiday away: an absolute start/end datetime window during which away mode is
 # engaged automatically. Stored as local ISO datetime strings in CONF_SETTINGS.
 # The schedule is re-armed from these absolute datetimes on every startup, so it

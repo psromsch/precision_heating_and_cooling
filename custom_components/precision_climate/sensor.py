@@ -145,7 +145,14 @@ class RoomTargetSensor(PrecisionBaseEntity, SensorEntity):
 
     @property
     def extra_state_attributes(self) -> dict:
-        return {"active": self._coordinator.resolved_active.get(self._room.room_id)}
+        # Hysteresis is published here so external automations (e.g. a
+        # supplementary electric heater) can use the same band as the boiler
+        # without hard-coding it — change it in the integration, they follow.
+        return {
+            "active": self._coordinator.resolved_active.get(self._room.room_id),
+            "lower_hysteresis": self._room.lower_hysteresis,
+            "upper_hysteresis": self._room.upper_hysteresis,
+        }
 
 
 class BoilerRuntimeSensor(PrecisionBaseEntity, SensorEntity):

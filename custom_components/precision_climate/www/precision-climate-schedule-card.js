@@ -30,7 +30,7 @@ const DAY_ORDER = ["all", "weekday", "weekend", "mon", "tue", "wed", "thu", "fri
 
 // Shown in the card footer so you can confirm which card version is live
 // after a HACS update (keep in sync with manifest.json).
-const CARD_VERSION = "0.9.6";
+const CARD_VERSION = "0.9.7";
 
 // Escape user-controlled strings (room/zone/person names, error messages)
 // before interpolating into innerHTML — markup in a name must render as text.
@@ -775,7 +775,7 @@ class PrecisionClimateScheduleCard extends HTMLElement {
     const heatIcon = heating ? `<span class="pcs-heat-icon" title="Heating">🔥</span>` : "";
     const tempSpan = temp ? `<span class="pcs-cur-temp">(${temp})</span>` : "";
     const isActive = info.active === true;
-    const modeBadge = `<span class="pcs-mode-badge ${isActive ? "pcs-mode-active" : "pcs-mode-passive"}" title="${isActive ? "Active: heats as soon as it falls below target" : "Passive: only opens once genuinely cold, never calls the boiler"}">${isActive ? "active" : "passive"}</span>`;
+    const modeBadge = `<span class="pcs-mode-badge ${isActive ? "pcs-mode-active" : "pcs-mode-passive"}" title="${isActive ? "Active: heats as soon as it falls below target" : "Passive: never calls the boiler, but heats along with it (rides) whenever it is already on for an active room"}">${isActive ? "active" : "passive"}</span>`;
     const paused = !!info.paused;
     const pausedBadge = paused ? `<span class="pcs-paused-badge">paused</span>` : "";
     const pauseBtn = `<button class="pcs-btn pcs-pause-btn ${paused ? "pcs-resume" : ""}" data-pause="${room.room_id}|${paused ? "0" : "1"}" title="${paused ? "Resume room" : "Pause room (target 5°C until resumed)"}">${paused ? "▶ Resume" : "⏸ Pause"}</button>`;

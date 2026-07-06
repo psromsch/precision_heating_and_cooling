@@ -98,17 +98,48 @@ def test_trv_closes_when_above_upper_hysteresis():
     assert decision.trv_open["r1"] is False
 
 
-def test_passive_room_opens_only_below_lower_hysteresis():
-    # passive room at 19.8: below target but above demand threshold -> stays closed
-    passive_warm = room(is_active=False, temperature=19.8)
-    decision = evaluate([passive_warm], SystemState(trv_open={"r1": False}))
+def test_passive_room_opens_below_target_like_active():
+    # Passive rooms now use the same valve rule as active rooms: open as soon as
+    # temp < target. Lower hysteresis is irrelevant for passive rooms.
+    # 19.8 is below target (20) but above the old demand threshold (19.5) -> now opens.
+    passive = room(is_active=False, temperature=19.8)
+    decision = evaluate([passive], SystemState(trv_open={"r1": False}))
+    assert decision.trv_open["r1"] is True
+    assert decision.boiler_on is False  # but a passive room never drives the boiler
+
+
+def test_passive_room_rides_only_when_boiler_on_but_valve_still_opens():
+    # Lower hysteresis irrelevant: 19.8 and 19.4 behave identically (both < target).
+    for temp in (19.8, 19.4):
+        passive = room(is_active=False, temperature=temp)
+        decision = evaluate([passive], SystemState(boiler_on=False, trv_open={"r1": False}))
+        assert decision.trv_open["r1"] is True
+        assert decision.boiler_on is False
+
+
+def test_passive_room_closes_at_target_plus_upper():
+    # Rides up to target + upper (20.5), then closes — upper hysteresis matters.
+    passive_hot = room(is_active=False, temperature=20.5)
+    decision = evaluate([passive_hot], SystemState(boiler_on=True, trv_open={"r1": True}))
     assert decision.trv_open["r1"] is False
 
-    # passive room at 19.4: below demand threshold -> opens and waits
-    passive_cold = room(is_active=False, temperature=19.4)
-    decision = evaluate([passive_cold], SystemState(boiler_on=False, trv_open={"r1": False}))
-    assert decision.trv_open["r1"] is True
-    assert decision.boiler_on is False  # but boiler stays off
+    # In the band [target, target+upper): hold previous (keep riding).
+    passive_band = room(is_active=False, temperature=20.2)
+    held_open = evaluate([passive_band], SystemState(boiler_on=True, trv_open={"r1": True}))
+    assert held_open.trv_open["r1"] is True
+    held_closed = evaluate([passive_band], SystemState(boiler_on=True, trv_open={"r1": False}))
+    assert held_closed.trv_open["r1"] is False
+
+
+def test_passive_rides_alongside_active_when_boiler_fires():
+    # An active room hitting its demand threshold fires the boiler, and a passive
+    # room below its target opens and heats at the same moment.
+    cold_active = room(room_id="a", is_active=True, temperature=19.4)  # <= 19.5 -> demand
+    passive = room(room_id="p", is_active=False, temperature=19.8)     # < 20 -> rides
+    decision = evaluate([cold_active, passive], SystemState(boiler_on=False))
+    assert decision.boiler_on is True
+    assert decision.trv_open["a"] is True
+    assert decision.trv_open["p"] is True
 
 
 # --- Overrides ---------------------------------------------------------------

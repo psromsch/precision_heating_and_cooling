@@ -16,7 +16,11 @@ Precedence, highest wins:
   5. Global away      -> caps the target only; KEEPS the active/passive flag, so
      an active room can still fire the boiler to hold the away target (the sole
      exception to "away = passive").
-  6. Schedule         -> the base target + active flag.
+  6. Soft away        -> if an alarm is armed and NO away (per-room or global)
+     is in effect, lower the schedule target by a fixed delta, clamped so it
+     never drops below the room's away target (soft is always gentler than
+     full away). Active/passive is untouched.
+  7. Schedule         -> the base target + active flag.
 """
 
 from __future__ import annotations
@@ -45,6 +49,8 @@ def resolve_room_mode(
     presence_state: str | None = None,  # PRESENCE_PRESENT | PRESENCE_ABSENT | None
     present_action: str = PRESENT_ACTION_ACTIVE,
     absent_action: str = "passive",
+    soft_away_active: bool = False,
+    soft_away_delta: float = 0.0,
 ) -> tuple[float, bool]:
     """Return the effective ``(target, is_active)`` for a room this cycle."""
     # 1. Boost wins over everything.
@@ -74,14 +80,26 @@ def resolve_room_mode(
     # the schedule's active flag as the fallback.
 
     # 3. Per-room away (manual toggle or presence-absent-away): cap + PASSIVE.
+    #    A real away overrules soft away entirely.
     if room_away:
         if away_target is not None:
             target = min(target, away_target)
         return target, False
 
     # 5. Global away: cap the target only, keep the active flag so the boiler can
-    #    still be driven to hold the away temperature.
-    if global_away and away_target is not None:
-        target = min(target, away_target)
+    #    still be driven to hold the away temperature. Overrules soft away.
+    if global_away:
+        if away_target is not None:
+            target = min(target, away_target)
+        return target, active
+
+    # 6. Soft away: no other away is in effect, so if the alarm is armed lower
+    #    the target by the delta — but never below the away target (soft stays
+    #    gentler than full away).
+    if soft_away_active and soft_away_delta > 0:
+        reduced = target - soft_away_delta
+        if away_target is not None:
+            reduced = max(reduced, away_target)
+        target = reduced
 
     return target, active

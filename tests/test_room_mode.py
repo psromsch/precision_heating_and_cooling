@@ -141,3 +141,55 @@ def test_present_passive_absent_away_combo():
 def test_away_without_configured_target_still_passive():
     # No away target configured -> can't cap, but away still forces passive.
     assert resolve(away_target=None, manual_room_away=True) == (20.0, False)
+
+
+# --- Soft away (alarm armed) -------------------------------------------------
+
+def test_soft_away_lowers_target_keeps_active():
+    # Alarm armed, no other away -> target drops by the delta, flag unchanged.
+    assert resolve(soft_away_active=True, soft_away_delta=2.0) == (18.0, True)
+    assert resolve(
+        schedule_active=False, soft_away_active=True, soft_away_delta=2.0
+    ) == (18.0, False)
+
+
+def test_soft_away_inactive_no_change():
+    assert resolve(soft_away_active=False, soft_away_delta=2.0) == (20.0, True)
+
+
+def test_soft_away_clamped_to_away_target():
+    # A big delta can't drop below the away target (soft stays gentler).
+    assert resolve(away_target=15.0, soft_away_active=True, soft_away_delta=9.0) == (
+        15.0,
+        True,
+    )
+
+
+def test_manual_away_overrules_soft_away():
+    # Room already away -> away target, soft away ignored entirely.
+    assert resolve(
+        manual_room_away=True, soft_away_active=True, soft_away_delta=2.0
+    ) == (15.0, False)
+
+
+def test_global_away_overrules_soft_away():
+    assert resolve(
+        global_away=True, soft_away_active=True, soft_away_delta=2.0
+    ) == (15.0, True)
+
+
+def test_boost_overrules_soft_away():
+    assert resolve(
+        boost_target=22.0, soft_away_active=True, soft_away_delta=2.0
+    ) == (22.0, True)
+
+
+def test_soft_away_with_presence_absent_away_uses_away():
+    # Presence sends the room to away -> away wins over soft away.
+    assert resolve(
+        has_presence=True,
+        presence_state=PRESENCE_ABSENT,
+        absent_action="away",
+        soft_away_active=True,
+        soft_away_delta=2.0,
+    ) == (15.0, False)

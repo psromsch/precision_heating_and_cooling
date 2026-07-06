@@ -30,7 +30,7 @@ const DAY_ORDER = ["all", "weekday", "weekend", "mon", "tue", "wed", "thu", "fri
 
 // Shown in the card footer so you can confirm which card version is live
 // after a HACS update (keep in sync with manifest.json).
-const CARD_VERSION = "0.9.8";
+const CARD_VERSION = "0.9.9";
 
 // Escape user-controlled strings (room/zone/person names, error messages)
 // before interpolating into innerHTML — markup in a name must render as text.
@@ -220,11 +220,13 @@ class PrecisionClimateScheduleCard extends HTMLElement {
     const masterOn = statusState ? statusState.attributes.master_on !== false : true;
     const masterEntityId = statusState ? (statusState.attributes.master_switch_entity_id || null) : null;
     const awayOn = statusState ? statusState.attributes.away_on === true : false;
+    const softAwayOn = statusState ? statusState.attributes.soft_away_on === true : false;
+    const softAwayDelta = statusState ? Number(statusState.attributes.soft_away_delta ?? 0) : 0;
     const reason = statusState ? (statusState.state || "") : "";
     const roomsInfo = this._roomsInfo();
 
     this._body.innerHTML =
-      this._renderBoilerStatus(boilerOn, masterOn, masterEntityId, reason, awayOn) +
+      this._renderBoilerStatus(boilerOn, masterOn, masterEntityId, reason, awayOn, softAwayOn, softAwayDelta) +
       (this._confirmMaster ? this._renderMasterConfirm() : "") +
       `<div class="${masterOn ? "" : "pcs-master-off"}">` +
       schedules.map((room, i) => this._renderRoom(room, roomsInfo, i, schedules.length)).join("") +
@@ -338,6 +340,11 @@ class PrecisionClimateScheduleCard extends HTMLElement {
       // Holiday away window (absolute datetimes, local "YYYY-MM-DDTHH:MM").
       away_holiday_start: holiday.start || "",
       away_holiday_end: holiday.end || "",
+      // Soft away (alarm-armed target reduction).
+      soft_away_entity: (statusState && statusState.attributes.soft_away_entity) || "",
+      soft_away_delta: statusState ? Number(statusState.attributes.soft_away_delta ?? 2) : 2,
+      soft_away_states:
+        (statusState && statusState.attributes.soft_away_states) || ["armed_away", "armed_vacation"],
     };
     schedules.forEach((r) => {
       this._settingsDraft.away_targets[r.room_id] = Number(awayTargets[r.room_id] ?? 16);
@@ -349,6 +356,12 @@ class PrecisionClimateScheduleCard extends HTMLElement {
     this._settingsOpen = true;
     this._error = null;
     this._render();
+  }
+
+  _alarmEntityIds() {
+    return Object.keys(this._hass.states)
+      .filter((id) => id.startsWith("alarm_control_panel."))
+      .sort();
   }
 
   _childLockOn(entities) {
@@ -381,6 +394,9 @@ class PrecisionClimateScheduleCard extends HTMLElement {
       presence_grace_minutes: Number(draft.presence_grace) || 10,
       away_holiday_start: draft.away_holiday_start || "",
       away_holiday_end: draft.away_holiday_end || "",
+      soft_away_entity: draft.soft_away_entity || "",
+      soft_away_delta: Number(draft.soft_away_delta) || 0,
+      soft_away_states: draft.soft_away_states || [],
     };
     try {
       await this._hass.callService("precision_climate", "set_settings", {
@@ -448,12 +464,17 @@ class PrecisionClimateScheduleCard extends HTMLElement {
     }
   }
 
-  _renderBoilerStatus(boilerOn, masterOn, masterEntityId, reason, awayOn) {
+  _renderBoilerStatus(boilerOn, masterOn, masterEntityId, reason, awayOn, softAwayOn, softAwayDelta) {
     const icon = boilerOn ? "🔥" : "⚪";
     const label = boilerOn ? "Boiler ON" : "Boiler OFF";
     const cls = boilerOn ? "pcs-boiler-on" : "pcs-boiler-off";
     const reasonHtml = reason ? ` <span class="pcs-reason">— ${reason}</span>` : "";
     const awayHtml = awayOn ? ` <span class="pcs-away-badge">🏠 AWAY</span>` : "";
+    // Soft away only shows when full away isn't already active (away overrules it).
+    const softHtml =
+      softAwayOn && !awayOn
+        ? ` <span class="pcs-softaway-badge" title="Alarm armed — all targets lowered by ${softAwayDelta}°">🛡️ soft −${softAwayDelta}°</span>`
+        : "";
 
     let masterBtn = "";
     if (masterEntityId) {
@@ -471,7 +492,7 @@ class PrecisionClimateScheduleCard extends HTMLElement {
     const gearBtn = `<button class="pcs-btn pcs-gear-btn" data-open-settings title="Global configuration">⚙</button>`;
 
     return `<div class="pcs-boiler ${cls}${masterOn ? "" : " pcs-boiler-master-off"}">
-      <span>${icon} <strong>${label}</strong>${reasonHtml}${awayHtml}</span>
+      <span>${icon} <strong>${label}</strong>${reasonHtml}${awayHtml}${softHtml}</span>
       <span class="pcs-boiler-actions">${masterBtn}${gearBtn}</span>
     </div>`;
   }
@@ -576,6 +597,44 @@ class PrecisionClimateScheduleCard extends HTMLElement {
               value="${d.away_holiday_end || ""}">
           </div>
           <button class="pcs-btn pcs-holiday-clear">Clear holiday window</button>
+        </div>
+        <div class="pcs-holiday">
+          <div class="pcs-holiday-title">🛡️ Soft away (optional)</div>
+          <div class="pcs-hint">
+            While the chosen alarm panel is armed (states below), every room's
+            target drops by the delta — the house still heats, just cooler.
+            Any real away (per-room or whole-system) overrules soft away, and
+            it never drops a room below its away target. Leave the entity blank
+            to disable.
+          </div>
+          <div class="pcs-field pcs-presence-field-wide">
+            <label>Alarm panel entity</label>
+            <select class="pcs-in pcs-softaway-entity">
+              <option value=""${!d.soft_away_entity ? " selected" : ""}>— none —</option>
+              ${(this._alarmEntityIds() || [])
+                .map(
+                  (id) =>
+                    `<option value="${id}"${id === (d.soft_away_entity || "") ? " selected" : ""}>${esc(id)}</option>`
+                )
+                .join("")}
+            </select>
+          </div>
+          <div class="pcs-field">
+            <label>Lower targets by (°C)</label>
+            <input class="pcs-in pcs-softaway-delta" type="number" min="0" max="15"
+              step="0.5" value="${Number(d.soft_away_delta ?? 2)}">
+          </div>
+          <div class="pcs-field pcs-presence-field-wide">
+            <label>Armed states that trigger it (hold Ctrl/⌘)</label>
+            <select class="pcs-in pcs-softaway-states" multiple size="5">
+              ${["armed_away", "armed_vacation", "armed_home", "armed_night", "armed_custom_bypass"]
+                .map(
+                  (st) =>
+                    `<option value="${st}"${(d.soft_away_states || []).includes(st) ? " selected" : ""}>${st}</option>`
+                )
+                .join("")}
+            </select>
+          </div>
         </div>`;
     }
     if (this._settingsTab === "childlock") {
@@ -693,6 +752,18 @@ class PrecisionClimateScheduleCard extends HTMLElement {
     const holidayEnd = this._body.querySelector(".pcs-holiday-end");
     if (holidayEnd) {
       this._settingsDraft.away_holiday_end = holidayEnd.value || "";
+    }
+    const softEntity = this._body.querySelector(".pcs-softaway-entity");
+    if (softEntity) {
+      this._settingsDraft.soft_away_entity = softEntity.value || "";
+    }
+    const softDelta = this._body.querySelector(".pcs-softaway-delta");
+    if (softDelta) {
+      this._settingsDraft.soft_away_delta = parseFloat(softDelta.value) || 0;
+    }
+    const softStates = this._body.querySelector(".pcs-softaway-states");
+    if (softStates) {
+      this._settingsDraft.soft_away_states = Array.from(softStates.selectedOptions).map((o) => o.value);
     }
   }
 
@@ -1007,6 +1078,7 @@ const STYLE = `
 
   /* Away mode */
   .pcs-away-badge { font-weight: 700; font-size: .72em; letter-spacing: .04em; padding: 1px 6px; border-radius: 8px; background: #2563eb; color: #fff; white-space: nowrap; }
+  .pcs-softaway-badge { font-weight: 700; font-size: .72em; letter-spacing: .04em; padding: 1px 6px; border-radius: 8px; background: #0d9488; color: #fff; white-space: nowrap; }
   .pcs-away-toggle-row { margin-bottom: 8px; }
   .pcs-away-toggle { font-weight: 600; }
   .pcs-away-field { flex-direction: row; align-items: center; justify-content: space-between; max-width: 280px; gap: 12px; }

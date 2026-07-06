@@ -150,6 +150,31 @@ class RuntimeConfig:
         except (ValueError, TypeError):
             return None
 
+    @property
+    def soft_away_entity(self) -> str | None:
+        """The alarm_control_panel that triggers soft away, or None."""
+        from ..const import CONF_SOFT_AWAY_ENTITY
+
+        return self.settings.get(CONF_SOFT_AWAY_ENTITY) or None
+
+    @property
+    def soft_away_delta(self) -> float:
+        """°C to subtract from each target while soft away is active."""
+        from ..const import CONF_SOFT_AWAY_DELTA, DEFAULT_SOFT_AWAY_DELTA
+
+        return _safe_float(
+            self.settings.get(CONF_SOFT_AWAY_DELTA), DEFAULT_SOFT_AWAY_DELTA
+        )
+
+    @property
+    def soft_away_states(self) -> list[str]:
+        """Alarm states that count as armed for soft away."""
+        from ..const import CONF_SOFT_AWAY_STATES, DEFAULT_SOFT_AWAY_STATES
+
+        raw = self.settings.get(CONF_SOFT_AWAY_STATES)
+        states = _safe_list(raw)
+        return states or list(DEFAULT_SOFT_AWAY_STATES)
+
 
 def _safe_float(value, default: float) -> float:
     """Coerce a settings value to float, falling back on garbage.

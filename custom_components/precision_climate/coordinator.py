@@ -45,10 +45,12 @@ from homeassistant.helpers.storage import Store
 import homeassistant.util.dt as dt_util
 
 from .const import (
+    ABSENT_ACTION_PASSIVE,
     DEFAULT_OVERHEAT_THRESHOLD,
     DOMAIN,
     Mode,
     PAUSE_TARGET,
+    PRESENT_ACTION_ACTIVE,
     PROLONGED_HEATING_SECONDS,
     TRV_MISMATCH_SECONDS,
     TRV_UNAVAILABLE_SECONDS,
@@ -58,6 +60,11 @@ from .const import (
     force_flow_setpoint,
 )
 from .control.loop import evaluate
+from .control.mode import (
+    PRESENCE_ABSENT,
+    PRESENCE_PRESENT,
+    resolve_room_mode,
+)
 from .failsafes.logic import (
     SustainedCondition,
     UnresponsiveTrv,
@@ -129,6 +136,16 @@ class PrecisionClimateCoordinator:
         self._trv_to_room: dict[str, str] = {
             trv: r.room_id for r in self.config.rooms for trv in r.trvs
         }
+        # Per-room presence (occupancy) sensors. Confirmed state per room
+        # ("present"/"absent"/None-until-confirmed); a pending dwell timer per
+        # room debounces both edges. Maps the sensor entity back to its room.
+        self._presence_entity_to_room: dict[str, str] = {
+            r.presence_entity: r.room_id
+            for r in self.config.rooms
+            if r.presence_entity
+        }
+        self._room_presence: dict[str, str | None] = {}
+        self._presence_dwell_unsub: dict[str, object] = {}
         # monotonic timestamp of each TRV's last observed setpoint change, so
         # the drift guard leaves recently-touched valves alone (live dialing).
         self._trv_setpoint_changed_mono: dict[str, float] = {}
@@ -228,6 +245,7 @@ class PrecisionClimateCoordinator:
             )
         self._schedule_next_boundary()
         self._setup_presence_tracking()
+        self._setup_room_presence_tracking()
         # Seed the commanded state from the REAL entities so the first evaluation
         # produces a genuine delta when reality disagrees with the decision
         # (e.g. the boiler was left on, or config changed and the loop now wants
@@ -313,6 +331,78 @@ class PrecisionClimateCoordinator:
             async_track_state_change_event(self.hass, persons, self._handle_person_event)
         )
 
+    def _setup_room_presence_tracking(self) -> None:
+        """Subscribe to per-room occupancy sensors and seed their state."""
+        entities = list(self._presence_entity_to_room)
+        if not entities:
+            return
+        self._unsubs.append(
+            async_track_state_change_event(
+                self.hass, entities, self._handle_room_presence_event
+            )
+        )
+        # Seed the dwell timers from each sensor's current state so a room that
+        # is already occupied at startup confirms after its on-delay (rather
+        # than never, if the sensor doesn't change again).
+        for entity, room_id in self._presence_entity_to_room.items():
+            state = self.hass.states.get(entity)
+            self._schedule_presence_confirm(room_id, entity, state)
+
+    # --- Per-room presence (occupancy) --------------------------------------
+
+    @callback
+    def _handle_room_presence_event(self, event: Event) -> None:
+        entity = event.data.get("entity_id")
+        room_id = self._presence_entity_to_room.get(entity)
+        if room_id is None:
+            return
+        self._schedule_presence_confirm(room_id, entity, event.data.get("new_state"))
+
+    def _schedule_presence_confirm(self, room_id: str, entity: str, state) -> None:
+        """(Re)arm the dwell timer that confirms a room's presence state.
+
+        Occupied/vacant must hold for the room's on/off dwell minutes before it
+        takes effect, debouncing a brief walk-through or a momentary sensor
+        drop. An unavailable/unknown sensor holds the last confirmed state.
+        """
+        # A pending confirmation is always superseded by a newer reading.
+        unsub = self._presence_dwell_unsub.pop(room_id, None)
+        if unsub is not None:
+            unsub()
+
+        if state is None or state.state in (STATE_UNAVAILABLE, STATE_UNKNOWN):
+            return  # hold last confirmed state
+
+        occupied = state.state == STATE_ON
+        target = PRESENCE_PRESENT if occupied else PRESENCE_ABSENT
+        if self._room_presence.get(room_id) == target:
+            return  # already in this state; nothing to confirm
+
+        cfg = self.config.room_by_id(room_id)
+        if cfg is None:
+            return
+        minutes = cfg.presence_on_minutes if occupied else cfg.presence_off_minutes
+        self._presence_dwell_unsub[room_id] = async_call_later(
+            self.hass,
+            max(0.0, float(minutes)) * 60.0,
+            self._make_presence_confirm(room_id, target),
+        )
+
+    def _make_presence_confirm(self, room_id: str, target: str):
+        @callback
+        def _confirm(_now) -> None:
+            self._presence_dwell_unsub.pop(room_id, None)
+            self._room_presence[room_id] = target
+            self.hass.async_create_task(self.async_evaluate())
+
+        return _confirm
+
+    def _cancel_presence_timers(self) -> None:
+        for room_id in list(self._presence_dwell_unsub):
+            unsub = self._presence_dwell_unsub.pop(room_id, None)
+            if unsub is not None:
+                unsub()
+
     async def async_unload(self) -> None:
         for unsub in self._unsubs:
             unsub()
@@ -323,6 +413,7 @@ class PrecisionClimateCoordinator:
         for room_id in list(self._boost_unsub):
             self._cancel_boost_timer(room_id)
         self._cancel_grace_timer()
+        self._cancel_presence_timers()
         if self._runtime_tick_unsub is not None:
             self._runtime_tick_unsub()
             self._runtime_tick_unsub = None
@@ -548,33 +639,30 @@ class PrecisionClimateCoordinator:
             self.config.schedules, weekday, minute, self.config.default_room
         )
         resolved_by_id = {r.room_id: r for r in resolved}
-        # Away mode caps each room's target at its configured away target
-        # (min of schedule and away). Active/passive is left as scheduled.
-        if self._away_on:
-            for r in resolved:
-                away = self.config.away_target(r.room_id)
-                if away is not None:
-                    r.target = min(r.target, away)
-        # Per-room away: cap at the room's configured away target (independent of
-        # global away). Applied before pause so pause always wins over away.
-        for r in resolved:
-            if r.room_id in self._room_away:
-                away = self.config.away_target(r.room_id)
-                if away is not None:
-                    r.target = min(r.target, away)
-        # Paused rooms have their effective target dropped so they stop calling
-        # for heat. The stored schedule is untouched, so resume restores it.
-        for r in resolved:
-            if r.room_id in self._room_paused:
-                r.target = PAUSE_TARGET
-        # Boost overrides both the schedule target and the active/passive flag
-        # for the boost window. Prune expired boosts first; boost wins over pause.
+        # Prune expired boosts before they feed the resolution below.
         self._prune_expired_boosts()
+        # Resolve each room's effective (target, active) through the full
+        # override precedence: boost > pause > per-room away > presence >
+        # global away > schedule. "Away = passive" (per-room and presence-away),
+        # with global away the sole exception (caps only, keeps the active flag
+        # so the boiler can still be driven). See control.mode.resolve_room_mode.
         for r in resolved:
+            cfg = self.config.room_by_id(r.room_id)
             boost = self._room_boost.get(r.room_id)
-            if boost is not None:
-                r.target = boost["target"]
-                r.is_active = True
+            r.target, r.is_active = resolve_room_mode(
+                schedule_target=r.target,
+                schedule_active=r.is_active,
+                away_target=self.config.away_target(r.room_id),
+                pause_target=PAUSE_TARGET,
+                boost_target=(boost["target"] if boost is not None else None),
+                paused=r.room_id in self._room_paused,
+                manual_room_away=r.room_id in self._room_away,
+                global_away=self._away_on,
+                has_presence=bool(cfg and cfg.has_presence),
+                presence_state=self._room_presence.get(r.room_id),
+                present_action=(cfg.present_action if cfg else PRESENT_ACTION_ACTIVE),
+                absent_action=(cfg.absent_action if cfg else ABSENT_ACTION_PASSIVE),
+            )
         self.resolved_targets = {r.room_id: r.target for r in resolved}
         self.resolved_active = {r.room_id: r.is_active for r in resolved}
 
@@ -1115,6 +1203,10 @@ class PrecisionClimateCoordinator:
         await self.async_evaluate()
         if not on:
             await self._async_evaluate_presence()
+
+    def room_presence_state(self, room_id: str) -> str | None:
+        """Confirmed occupancy for a room ('present'/'absent'), or None."""
+        return self._room_presence.get(room_id)
 
     def room_paused(self, room_id: str) -> bool:
         return room_id in self._room_paused

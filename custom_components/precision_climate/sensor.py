@@ -82,6 +82,12 @@ class SystemStatusSensor(PrecisionBaseEntity, SensorEntity):
                 "boost_target": boost["target"] if boost else None,
                 "boost_expires": boost["expires"].isoformat() if boost else None,
                 "away_target": c.config.away_target(rid),
+                # Per-room occupancy sensor: when configured, presence overrides
+                # the schedule's active/passive flag, so the card renders the
+                # timeline neutrally (targets only). presence_state is the live
+                # confirmed occupancy ("present"/"absent"/None).
+                "has_presence": room.has_presence,
+                "presence_state": c.room_presence_state(rid),
                 # Source entity_ids so the history card can plot recorded data
                 # without any per-room dashboard configuration.
                 "thermometer_entity_id": room.thermometer,

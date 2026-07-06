@@ -15,13 +15,24 @@ Algorithm (heating):
       with no temperature feedback.
     - Otherwise hold the previous boiler state.
 
-* TRV per room (latching hysteresis, independent of the boiler so passive rooms
-  can "open and wait"):
-    - Active room: open when temp < target, close when temp >= satisfied_threshold.
-      If thermometer is unavailable: close (cannot confirm demand, fail-safe shut).
-    - Passive room: open when temp <= demand_threshold, close when temp >=
-      satisfied_threshold. If thermometer is unavailable: hold previous state.
-    - Otherwise hold the previous TRV state.
+* TRV per room (latching hysteresis). The valve rule is the SAME for active and
+  passive rooms — the only difference between the two is that active rooms drive
+  the boiler and passive rooms do not (see the boiler rules above). A passive
+  room is therefore just an active room that can't summon the boiler: it "rides"
+  whenever the boiler is already running for some active room.
+    - Any room with a thermometer: open when temp < target, close when temp >=
+      satisfied_threshold (target + upper_hyst); otherwise hold. Heat only
+      actually flows while the boiler is on, so a passive valve open with the
+      boiler off is inert — the room waits, then heats the instant an active
+      room fires the boiler, and its ride stops (stays where it reached) when
+      the boiler goes off again.
+    - Active room, thermometer unavailable: close (cannot confirm demand,
+      fail-safe shut).
+    - Passive room, thermometer unavailable: hold previous state.
+
+  Note: lower_hysteresis is meaningless for a passive room — it only ever set
+  the boiler-demand threshold, and passive rooms never demand. Only target and
+  upper_hysteresis affect a passive room.
 
 Overrides (highest priority first):
     1. Master OFF / paused        -> boiler OFF, all TRVs CLOSED.
@@ -67,18 +78,17 @@ def _trv_intent(
         return prev_open
 
     satisfied_threshold = eff_target + room.upper_hysteresis
-    demand_threshold = eff_target - room.lower_hysteresis
 
     if room.temperature >= satisfied_threshold:
-        return False  # close: room is satisfied
-    if room.is_active:
-        if room.temperature < eff_target:
-            return True  # active rooms open as soon as they fall below target
-    else:
-        if room.temperature <= demand_threshold:
-            return True  # passive rooms only open once genuinely cold
+        return False  # close: room is satisfied (rode up to target + upper_hyst)
+    if room.temperature < eff_target:
+        # Both active and passive rooms open below target. Passive rooms only
+        # heat while the boiler is already on (they can't drive it); an open
+        # passive valve with the boiler off is inert, so gating here is
+        # unnecessary — the boiler being off simply means no flow.
+        return True
 
-    return prev_open  # in the hysteresis band: hold
+    return prev_open  # in the hysteresis band [target, target + upper]: hold
 
 
 def evaluate(

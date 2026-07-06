@@ -128,6 +128,17 @@ ABSENT_ACTION_AWAY = "away"
 CONF_AWAY_HOLIDAY_START = "away_holiday_start"
 CONF_AWAY_HOLIDAY_END = "away_holiday_end"
 
+# Soft away: while a chosen alarm_control_panel is armed (e.g. Alarmo), lower
+# every room's target by a fixed delta. Purely a target reduction — active/
+# passive is untouched, so the house still heats, just cooler. Any real away
+# (per-room, presence-away, or whole-system away) overrules it entirely. Stored
+# in CONF_SETTINGS. No persistence needed: the alarm state is read live.
+CONF_SOFT_AWAY_ENTITY = "soft_away_entity"     # an alarm_control_panel entity
+CONF_SOFT_AWAY_DELTA = "soft_away_delta"       # °C to subtract from each target
+CONF_SOFT_AWAY_STATES = "soft_away_states"     # armed states that trigger it
+DEFAULT_SOFT_AWAY_DELTA = 2.0
+DEFAULT_SOFT_AWAY_STATES = ["armed_away", "armed_vacation"]
+
 # --- Failsafe default thresholds (seconds / degrees) -------------------------
 PROLONGED_HEATING_SECONDS = 5 * 60 * 60        # 5 hours of continuous boiler run
 TRV_MISMATCH_SECONDS = 10 * 60                 # boiler on 10 min with wrong TRV target

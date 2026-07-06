@@ -232,6 +232,9 @@ class PrecisionClimateCoordinator:
         tracked = [r.thermometer for r in self.config.rooms]
         for r in self.config.rooms:
             tracked.extend(r.windows)
+        # Watch the soft-away alarm entity: an arm/disarm re-runs the loop.
+        if self.config.soft_away_entity:
+            tracked.append(self.config.soft_away_entity)
         if tracked:
             self._unsubs.append(
                 async_track_state_change_event(self.hass, tracked, self._handle_state_event)
@@ -587,6 +590,20 @@ class PrecisionClimateCoordinator:
             return False
         return state.state == STATE_ON
 
+    def _is_soft_away_active(self) -> bool:
+        """True if the configured alarm entity is in one of the armed states."""
+        entity = self.config.soft_away_entity
+        if not entity:
+            return False
+        state = self.hass.states.get(entity)
+        if state is None:
+            return False
+        return state.state in self.config.soft_away_states
+
+    @property
+    def soft_away_on(self) -> bool:
+        return self._is_soft_away_active()
+
     def _trv_target(self, entity_id: str) -> float | None:
         state = self.hass.states.get(entity_id)
         if state is None:
@@ -641,6 +658,8 @@ class PrecisionClimateCoordinator:
         resolved_by_id = {r.room_id: r for r in resolved}
         # Prune expired boosts before they feed the resolution below.
         self._prune_expired_boosts()
+        soft_away = self._is_soft_away_active()
+        soft_away_delta = self.config.soft_away_delta
         # Resolve each room's effective (target, active) through the full
         # override precedence: boost > pause > per-room away > presence >
         # global away > schedule. "Away = passive" (per-room and presence-away),
@@ -662,6 +681,8 @@ class PrecisionClimateCoordinator:
                 presence_state=self._room_presence.get(r.room_id),
                 present_action=(cfg.present_action if cfg else PRESENT_ACTION_ACTIVE),
                 absent_action=(cfg.absent_action if cfg else ABSENT_ACTION_PASSIVE),
+                soft_away_active=soft_away,
+                soft_away_delta=soft_away_delta,
             )
         self.resolved_targets = {r.room_id: r.target for r in resolved}
         self.resolved_active = {r.room_id: r.is_active for r in resolved}

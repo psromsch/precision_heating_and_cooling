@@ -190,18 +190,14 @@ def _room_schema(defaults: dict | None = None) -> vol.Schema:
             ),
             # Optional per-room occupancy sensor. When set, presence overrides
             # the schedule's active/passive flag (see the presence action
-            # selectors). EntitySelector rejects an empty-string default, so we
-            # only add a default when one exists.
-            **(
-                {
-                    vol.Optional(
-                        CONF_ROOM_PRESENCE_ENTITY,
-                        default=d[CONF_ROOM_PRESENCE_ENTITY],
-                    ): _entity_picker("binary_sensor")
-                }
-                if d.get(CONF_ROOM_PRESENCE_ENTITY)
-                else {vol.Optional(CONF_ROOM_PRESENCE_ENTITY): _entity_picker("binary_sensor")}
-            ),
+            # selectors). We use suggested_value (NOT default) so the field can
+            # be CLEARED when editing — a default would be re-applied by
+            # voluptuous whenever the user empties the box, making it impossible
+            # to remove a previously-selected sensor.
+            vol.Optional(
+                CONF_ROOM_PRESENCE_ENTITY,
+                description={"suggested_value": d.get(CONF_ROOM_PRESENCE_ENTITY) or None},
+            ): _entity_picker("binary_sensor"),
             vol.Required(
                 CONF_ROOM_PRESENT_ACTION,
                 default=d.get(CONF_ROOM_PRESENT_ACTION, PRESENT_ACTION_ACTIVE),
@@ -577,13 +573,13 @@ class PrecisionClimateOptionsFlow(config_entries.OptionsFlow):
         schema_dict[
             vol.Optional(CONF_NOTIFY_SERVICES, default=self._notify_services)
         ] = _notify_services_selector(self.hass)
-        # EntitySelector rejects an empty-string default, so only set a default
-        # when a forecast entity was actually configured.
+        # Use suggested_value (NOT default) so the forecast entity can be
+        # cleared — a default is re-applied by voluptuous when the box is
+        # emptied, making removal impossible.
         forecast = self._sunny.get(CONF_SUNNY_FORECAST_ENTITY)
-        forecast_key = (
-            vol.Optional(CONF_SUNNY_FORECAST_ENTITY, default=forecast)
-            if forecast
-            else vol.Optional(CONF_SUNNY_FORECAST_ENTITY)
+        forecast_key = vol.Optional(
+            CONF_SUNNY_FORECAST_ENTITY,
+            description={"suggested_value": forecast or None},
         )
         schema_dict.update({
             vol.Required(

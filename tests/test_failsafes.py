@@ -7,6 +7,7 @@ import sys
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]))
 
+from custom_components.precision_climate.const import TRV_UNRESPONSIVE_MIN_RISE
 from custom_components.precision_climate.failsafes.logic import (
     SustainedCondition,
     UnresponsiveTrv,
@@ -113,3 +114,24 @@ def test_unresponsive_trv_resets_when_heating_stops():
     # new heating cycle, baseline re-sampled at the higher temp
     trv.update(20 * MIN, True, 19.0)
     assert trv.update(20 * MIN + 45 * MIN, True, 19.1) is True  # only 0.1 rise -> fire
+
+
+# Production semantics: min_rise = 0.0 -> only a NET LOSS alerts. This is what
+# the coordinator wires up (TRV_UNRESPONSIVE_MIN_RISE), so slow rooms that
+# merely warm up gradually never false-trigger.
+
+def test_unresponsive_trv_fires_only_on_temperature_loss():
+    trv = UnresponsiveTrv(window_s=45 * MIN, min_rise=TRV_UNRESPONSIVE_MIN_RISE)
+    trv.update(0.0, True, 18.0)
+    assert trv.update(45 * MIN, True, 17.8) is True             # lost 0.2 -> fire
+
+
+def test_unresponsive_trv_silent_when_flat_or_slowly_rising():
+    # Flat: no change over the window -> no alert.
+    flat = UnresponsiveTrv(window_s=45 * MIN, min_rise=TRV_UNRESPONSIVE_MIN_RISE)
+    flat.update(0.0, True, 18.0)
+    assert flat.update(45 * MIN, True, 18.0) is False
+    # Barely rising (the old 0.3 case that used to fire): now silent.
+    slow = UnresponsiveTrv(window_s=45 * MIN, min_rise=TRV_UNRESPONSIVE_MIN_RISE)
+    slow.update(0.0, True, 18.0)
+    assert slow.update(45 * MIN, True, 18.1) is False

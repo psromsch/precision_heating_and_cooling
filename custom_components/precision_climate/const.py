@@ -142,7 +142,10 @@ DEFAULT_SOFT_AWAY_STATES = ["armed_away", "armed_vacation"]
 # --- Failsafe default thresholds (seconds / degrees) -------------------------
 PROLONGED_HEATING_SECONDS = 5 * 60 * 60        # 5 hours of continuous boiler run
 TRV_MISMATCH_SECONDS = 10 * 60                 # boiler on 10 min with wrong TRV target
-TRV_UNRESPONSIVE_SECONDS = 45 * 60             # boiler on 45 min, temp barely rises
-TRV_UNRESPONSIVE_MIN_RISE = 0.5                # minimum acceptable rise over the window
+TRV_UNRESPONSIVE_SECONDS = 45 * 60             # boiler on 45 min while the room cools
+# Fire only if the room LOST temperature over the window (delta < 0). A flat or
+# rising room never alerts, so slow rooms (heat loss to open, unheated areas)
+# don't false-trigger — only a room actively getting colder while heating does.
+TRV_UNRESPONSIVE_MIN_RISE = 0.0
 TRV_UNAVAILABLE_SECONDS = 15 * 60              # TRV offline 15 min while heating
 DEFAULT_OVERHEAT_THRESHOLD = 24.0              # absolute °C overheat alert

@@ -104,7 +104,7 @@
           "notify_prolonged_heating": "The boiler has been running continuously for over 5 hours.",
           "notify_overheating": "A heating room has exceeded the overheat threshold (24°C).",
           "notify_trv_mismatch": "A room that should be heating has a TRV target below its schedule target (the valve didn't take the open command).",
-          "notify_trv_unresponsive": "The boiler ran 45 min but a heating room's temperature barely rose — likely an open window or a failed valve.",
+          "notify_trv_unresponsive": "The boiler ran 45 min but a heating room LOST temperature — likely an open window or a failed valve. (Slow rooms that merely warm up gradually never trigger this.)",
           "notify_trv_unavailable": "A TRV went offline for over 15 minutes while its room was heating.",
           "notify_window": "A window opened in an active room and heating was suspended.",
           "notify_sunny_day": "Sunny-day savings reduced the active-room targets to save energy."

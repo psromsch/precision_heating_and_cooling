@@ -847,11 +847,11 @@ class PrecisionClimateCoordinator:
             else:
                 self._mismatch[cfg.room_id].update(mono, False)
 
-            # TRV unresponsive (heating but temperature barely rises).
+            # TRV unresponsive (heating 45 min but the room got colder).
             if self._unresponsive[cfg.room_id].update(mono, heating, room.temperature):
                 self._notify(
                     "trv_unresponsive",
-                    f"{cfg.name}: heating 45 min but temperature barely rose; check window/TRV.",
+                    f"{cfg.name}: heating 45 min but the room lost temperature; check window/TRV.",
                 )
 
             # TRV unavailable (offline while the room is heating).

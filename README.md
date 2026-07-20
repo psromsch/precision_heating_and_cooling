@@ -157,7 +157,7 @@ Precision Climate watches reality, not just its own intentions, and will alert y
 - **Unauthorized boiler** — the boiler is on when nothing should be running → forced off.
 - **Prolonged heating** — the boiler has run for many hours straight.
 - **Overheating** — a room has climbed well past a safe temperature.
-- **Stuck / unresponsive / offline valve** — a TRV isn't reaching its setpoint, isn't warming its room, or has dropped off the network while heating.
+- **Stuck / unresponsive / offline valve** — a TRV isn't reaching its setpoint, the room is *losing* temperature after 45 min of heating (slow rooms that merely warm up gradually never trigger this), or the valve has dropped off the network while heating.
 
 If an active room's thermometer goes offline, that room is safely excluded (its valve closes) rather than trusted blindly; if *all* active thermometers are offline, the boiler stops.
 

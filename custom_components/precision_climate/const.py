@@ -113,6 +113,11 @@ CONF_ROOM_PRESENCE_ON_MINUTES = "presence_on_minutes"    # continuous presence t
 CONF_ROOM_PRESENCE_OFF_MINUTES = "presence_off_minutes"  # continuous absence to confirm
 CONF_ROOM_PRESENT_ACTION = "present_action"          # "active" | "passive"
 CONF_ROOM_ABSENT_ACTION = "absent_action"            # "passive" | "away"
+# Optional time window (local "HH:MM[:SS]") during which the presence sensor
+# rules over the schedule. Outside it, the schedule rules and presence is
+# ignored. Both empty -> presence rules 24h (the original behaviour).
+CONF_ROOM_PRESENCE_START = "presence_start"
+CONF_ROOM_PRESENCE_END = "presence_end"
 DEFAULT_ROOM_PRESENCE_ON_MINUTES = 3
 DEFAULT_ROOM_PRESENCE_OFF_MINUTES = 5
 PRESENT_ACTION_ACTIVE = "active"

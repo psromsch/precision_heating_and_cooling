@@ -27,9 +27,11 @@ from ..const import (
     CONF_PRESENCE_ZONE,
     CONF_ROOM_ABSENT_ACTION,
     CONF_ROOM_ID,
+    CONF_ROOM_PRESENCE_END,
     CONF_ROOM_PRESENCE_ENTITY,
     CONF_ROOM_PRESENCE_OFF_MINUTES,
     CONF_ROOM_PRESENCE_ON_MINUTES,
+    CONF_ROOM_PRESENCE_START,
     CONF_ROOM_PRESENT_ACTION,
     CONF_ROOM_NAME,
     CONF_ROOM_ORDER,
@@ -79,6 +81,10 @@ class RoomConfig:
     presence_off_minutes: float = 5.0
     present_action: str = "active"   # "active" | "passive"
     absent_action: str = "passive"   # "passive" | "away"
+    # Optional local time window (minutes-of-day) in which presence rules over
+    # the schedule; None means "no window" -> presence rules all day.
+    presence_start: str | None = None
+    presence_end: str | None = None
 
     @property
     def child_lock_entities(self) -> list[str]:
@@ -88,6 +94,23 @@ class RoomConfig:
     @property
     def has_presence(self) -> bool:
         return bool(self.presence_entity)
+
+    def presence_rules_at(self, minute_of_day: int) -> bool:
+        """Whether the presence sensor rules (vs the schedule) at this minute.
+
+        No window configured -> presence rules all day. A window that wraps
+        midnight (start > end) is supported. Outside the window the caller
+        should ignore presence and let the schedule govern.
+        """
+        if not self.has_presence:
+            return False
+        start = _hhmm_to_min(self.presence_start)
+        end = _hhmm_to_min(self.presence_end)
+        if start is None or end is None or start == end:
+            return True  # no (usable) window -> presence rules 24h
+        if start < end:
+            return start <= minute_of_day < end
+        return minute_of_day >= start or minute_of_day < end  # wraps midnight
 
 
 @dataclass
@@ -200,6 +223,21 @@ def _safe_list(value) -> list:
     return list(value) if isinstance(value, (list, tuple, set)) else []
 
 
+def _hhmm_to_min(value) -> int | None:
+    """Parse a 'HH:MM' or 'HH:MM:SS' local time to minute-of-day, else None."""
+    if not value or not isinstance(value, str):
+        return None
+    parts = value.split(":")
+    try:
+        hh = int(parts[0])
+        mm = int(parts[1]) if len(parts) > 1 else 0
+    except (ValueError, IndexError):
+        return None
+    if not (0 <= hh < 24 and 0 <= mm < 60):
+        return None
+    return hh * 60 + mm
+
+
 def _parse_blocks(raw_blocks: dict) -> dict[str, list[ScheduleBlock]]:
     parsed: dict[str, list[ScheduleBlock]] = {}
     for day_key, blocks in raw_blocks.items():
@@ -249,6 +287,8 @@ def build_runtime(data: dict) -> RuntimeConfig:
                 ),
                 present_action=present_action,
                 absent_action=absent_action,
+                presence_start=raw.get(CONF_ROOM_PRESENCE_START) or None,
+                presence_end=raw.get(CONF_ROOM_PRESENCE_END) or None,
             )
         )
         schedules.append(

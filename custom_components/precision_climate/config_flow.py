@@ -35,9 +35,11 @@ from .const import (
     CONF_ROOM_ABSENT_ACTION,
     CONF_ROOM_ID,
     CONF_ROOM_NAME,
+    CONF_ROOM_PRESENCE_END,
     CONF_ROOM_PRESENCE_ENTITY,
     CONF_ROOM_PRESENCE_OFF_MINUTES,
     CONF_ROOM_PRESENCE_ON_MINUTES,
+    CONF_ROOM_PRESENCE_START,
     CONF_ROOM_PRESENT_ACTION,
     CONF_ROOMS,
     CONF_SCHEDULE_BLOCKS,
@@ -224,6 +226,17 @@ def _room_schema(defaults: dict | None = None) -> vol.Schema:
                 CONF_ROOM_PRESENCE_OFF_MINUTES,
                 default=d.get(CONF_ROOM_PRESENCE_OFF_MINUTES, DEFAULT_ROOM_PRESENCE_OFF_MINUTES),
             ): _minutes_number(),
+            # Optional time window in which presence rules over the schedule.
+            # suggested_value (not default) so the pair can be cleared to mean
+            # "presence rules all day". Leave both blank for 24h presence.
+            vol.Optional(
+                CONF_ROOM_PRESENCE_START,
+                description={"suggested_value": d.get(CONF_ROOM_PRESENCE_START) or None},
+            ): selector.TimeSelector(),
+            vol.Optional(
+                CONF_ROOM_PRESENCE_END,
+                description={"suggested_value": d.get(CONF_ROOM_PRESENCE_END) or None},
+            ): selector.TimeSelector(),
         }
     )
 
@@ -402,6 +415,8 @@ class PrecisionClimateOptionsFlow(config_entries.OptionsFlow):
                     CONF_ROOM_PRESENCE_OFF_MINUTES: user_input.get(
                         CONF_ROOM_PRESENCE_OFF_MINUTES, DEFAULT_ROOM_PRESENCE_OFF_MINUTES
                     ),
+                    CONF_ROOM_PRESENCE_START: user_input.get(CONF_ROOM_PRESENCE_START) or "",
+                    CONF_ROOM_PRESENCE_END: user_input.get(CONF_ROOM_PRESENCE_END) or "",
                 }
                 # Replace if editing, else append.
                 self._rooms = [

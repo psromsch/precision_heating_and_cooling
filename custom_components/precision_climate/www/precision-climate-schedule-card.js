@@ -30,7 +30,7 @@ const DAY_ORDER = ["all", "weekday", "weekend", "mon", "tue", "wed", "thu", "fri
 
 // Shown in the card footer so you can confirm which card version is live
 // after a HACS update (keep in sync with manifest.json).
-const CARD_VERSION = "0.9.9";
+const CARD_VERSION = "0.9.10";
 
 // Escape user-controlled strings (room/zone/person names, error messages)
 // before interpolating into innerHTML — markup in a name must render as text.
@@ -852,9 +852,14 @@ class PrecisionClimateScheduleCard extends HTMLElement {
     // state plus a 👤 marker and the confirmed occupancy.
     const hasPresence = info.has_presence === true;
     const presenceState = info.presence_state || null;
-    const presTitle = presenceState
+    const hhmm = (t) => (t ? String(t).slice(0, 5) : null);
+    const presWindow =
+      hasPresence && hhmm(info.presence_start) && hhmm(info.presence_end)
+        ? ` — presence rules ${hhmm(info.presence_start)}–${hhmm(info.presence_end)}, schedule outside`
+        : "";
+    const presTitle = (presenceState
       ? `Occupancy-controlled — currently ${presenceState} (${isActive ? "active" : "passive"})`
-      : "Occupancy-controlled — awaiting a confirmed reading";
+      : "Occupancy-controlled — awaiting a confirmed reading") + presWindow;
     const modeBadge = hasPresence
       ? `<span class="pcs-mode-badge ${isActive ? "pcs-mode-active" : "pcs-mode-passive"}" title="${presTitle}">👤 ${isActive ? "active" : "passive"}</span>`
       : `<span class="pcs-mode-badge ${isActive ? "pcs-mode-active" : "pcs-mode-passive"}" title="${isActive ? "Active: heats as soon as it falls below target" : "Passive: never calls the boiler, but heats along with it (rides) whenever it is already on for an active room"}">${isActive ? "active" : "passive"}</span>`;

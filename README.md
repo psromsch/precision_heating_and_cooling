@@ -134,6 +134,7 @@ Give any room an optional occupancy sensor (an mmWave radar is ideal) and let *p
 - **When occupied** → the room becomes **active** or **passive** (your choice).
 - **When vacant** → the room becomes **passive** or **away** (your choice).
 - **Dwell times** — "occupied for X minutes" before it counts (so a quick walk-through doesn't fire the boiler) and "vacant for Y minutes" before it stands down (so a moment of stillness doesn't drop the room). If the sensor goes unavailable, the room simply holds its last known state.
+- **Optional time window** — "presence rules from HH:MM until HH:MM". Inside the window, occupancy overrides the schedule; outside it, the schedule rules and the sensor is ignored. Leave both blank for 24-hour presence. (Handy when a sensor is only a reliable proxy at certain times of day — e.g. a nap detector that only makes sense in daylight hours.)
 
 Example: set a bedroom to **occupied → passive, vacant → away**. It rides the boiler while you're in it, and drops to the away temperature when you leave — hands-free.
 

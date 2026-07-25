@@ -88,6 +88,8 @@ class SystemStatusSensor(PrecisionBaseEntity, SensorEntity):
                 # confirmed occupancy ("present"/"absent"/None).
                 "has_presence": room.has_presence,
                 "presence_state": c.room_presence_state(rid),
+                "presence_start": room.presence_start,
+                "presence_end": room.presence_end,
                 # Source entity_ids so the history card can plot recorded data
                 # without any per-room dashboard configuration.
                 "thermometer_entity_id": room.thermometer,

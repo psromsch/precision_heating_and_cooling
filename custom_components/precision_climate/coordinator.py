@@ -668,6 +668,10 @@ class PrecisionClimateCoordinator:
         for r in resolved:
             cfg = self.config.room_by_id(r.room_id)
             boost = self._room_boost.get(r.room_id)
+            # Presence only rules within its configured time window (if any);
+            # outside it, the schedule governs, so we hide the sensor from the
+            # resolver by reporting has_presence=False.
+            presence_rules = bool(cfg and cfg.presence_rules_at(minute))
             r.target, r.is_active = resolve_room_mode(
                 schedule_target=r.target,
                 schedule_active=r.is_active,
@@ -677,7 +681,7 @@ class PrecisionClimateCoordinator:
                 paused=r.room_id in self._room_paused,
                 manual_room_away=r.room_id in self._room_away,
                 global_away=self._away_on,
-                has_presence=bool(cfg and cfg.has_presence),
+                has_presence=presence_rules,
                 presence_state=self._room_presence.get(r.room_id),
                 present_action=(cfg.present_action if cfg else PRESENT_ACTION_ACTIVE),
                 absent_action=(cfg.absent_action if cfg else ABSENT_ACTION_PASSIVE),

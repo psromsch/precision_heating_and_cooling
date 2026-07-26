@@ -30,7 +30,7 @@ const DAY_ORDER = ["all", "weekday", "weekend", "mon", "tue", "wed", "thu", "fri
 
 // Shown in the card footer so you can confirm which card version is live
 // after a HACS update (keep in sync with manifest.json).
-const CARD_VERSION = "0.9.10";
+const CARD_VERSION = "0.9.11";
 
 // Escape user-controlled strings (room/zone/person names, error messages)
 // before interpolating into innerHTML — markup in a name must render as text.
@@ -1188,11 +1188,21 @@ const STYLE = `
   .pcs-version { text-align: right; font-size: .7em; opacity: .35; margin-top: 8px; }
 `;
 
-customElements.define("precision-climate-schedule-card", PrecisionClimateScheduleCard);
+// Guard the define: if this module executes twice (mobile hard-reload, a
+// version-change re-fetch, or the resource present both as auto-load and a
+// manual resource), an unguarded customElements.define throws "already been
+// used", which aborts the module and leaves the dashboard stuck on
+// "Configuration error" until repeated reloads. Guarding keeps re-execution
+// harmless so HA's placeholder always upgrades to the real card.
+if (!customElements.get("precision-climate-schedule-card")) {
+  customElements.define("precision-climate-schedule-card", PrecisionClimateScheduleCard);
+}
 
 window.customCards = window.customCards || [];
-window.customCards.push({
-  type: "precision-climate-schedule-card",
-  name: "Precision Climate Schedule",
-  description: "Visual editor for Precision Climate room schedules.",
-});
+if (!window.customCards.some((c) => c.type === "precision-climate-schedule-card")) {
+  window.customCards.push({
+    type: "precision-climate-schedule-card",
+    name: "Precision Climate Schedule",
+    description: "Visual editor for Precision Climate room schedules.",
+  });
+}

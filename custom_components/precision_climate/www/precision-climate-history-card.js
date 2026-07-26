@@ -488,11 +488,18 @@ const STYLE = `
   .pch-version { text-align: right; font-size: .7em; opacity: .35; margin-top: 8px; }
 `;
 
-customElements.define("precision-climate-history-card", PrecisionClimateHistoryCard);
+// Guard the define so double-execution (mobile hard-reload / re-fetch /
+// duplicate resource) never throws "already been used" and aborts the module,
+// which is what leaves a dashboard stuck on "Configuration error".
+if (!customElements.get("precision-climate-history-card")) {
+  customElements.define("precision-climate-history-card", PrecisionClimateHistoryCard);
+}
 
 window.customCards = window.customCards || [];
-window.customCards.push({
-  type: "precision-climate-history-card",
-  name: "Precision Climate History",
-  description: "Per-room temperature / target / heating history for Precision Climate.",
-});
+if (!window.customCards.some((c) => c.type === "precision-climate-history-card")) {
+  window.customCards.push({
+    type: "precision-climate-history-card",
+    name: "Precision Climate History",
+    description: "Per-room temperature / target / heating history for Precision Climate.",
+  });
+}

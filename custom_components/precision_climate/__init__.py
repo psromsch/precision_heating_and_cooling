@@ -291,12 +291,71 @@ async def _async_register_card(hass: HomeAssistant) -> None:
             # Fallback for very old cores.
             hass.http.register_static_path(url, card_path, False)
 
-        try:
-            from homeassistant.components.frontend import add_extra_js_url
+        # Prefer registering as a Lovelace *resource*: Lovelace loads resources
+        # before it renders any card, so the element is always defined in time.
+        # add_extra_js_url does NOT integrate with that await, so on a slow
+        # (mobile) load the dashboard can render before the module defines the
+        # element -> intermittent "Configuration error" until a reload. We only
+        # fall back to add_extra_js_url when a resource can't be registered
+        # (e.g. YAML-mode dashboards, where the user adds the resource by hand).
+        registered = await _async_register_lovelace_resource(
+            hass, base_url=url, versioned_url=f"{url}?v={version}"
+        )
+        if not registered:
+            try:
+                from homeassistant.components.frontend import add_extra_js_url
 
-            add_extra_js_url(hass, f"{url}?v={version}")
-        except Exception:  # noqa: BLE001 - frontend not loaded; cards can be added manually
+                add_extra_js_url(hass, f"{url}?v={version}")
+            except Exception:  # noqa: BLE001 - frontend not loaded; add manually
+                pass
+
+
+async def _async_register_lovelace_resource(
+    hass: HomeAssistant, *, base_url: str, versioned_url: str
+) -> bool:
+    """Ensure a Lovelace module resource points at the card, updating its
+    version if it changed. Returns True if the resource is registered.
+
+    Defensive across HA versions and dashboard modes: returns False (so the
+    caller falls back to add_extra_js_url) on YAML-mode collections, missing
+    Lovelace data, or any error — this must never break setup.
+    """
+    try:
+        lovelace = hass.data.get("lovelace")
+        if lovelace is None:
+            return False
+        # LovelaceData dataclass (2024.x+) or the older dict layout.
+        resources = getattr(lovelace, "resources", None)
+        if resources is None and isinstance(lovelace, dict):
+            resources = lovelace.get("resources")
+        # Only the storage-backed collection can create/update items; the
+        # YAML-mode collection is read-only.
+        if resources is None or not hasattr(resources, "async_create_item"):
+            return False
+
+        # Make sure the collection is loaded before we inspect it.
+        try:
+            if hasattr(resources, "async_get_info"):
+                await resources.async_get_info()
+            elif not getattr(resources, "loaded", True):
+                await resources.async_load()
+        except Exception:  # noqa: BLE001
             pass
+
+        for item in resources.async_items():
+            if str(item.get("url", "")).split("?")[0] == base_url:
+                if item.get("url") != versioned_url:
+                    await resources.async_update_item(
+                        item["id"], {"res_type": "module", "url": versioned_url}
+                    )
+                return True
+
+        await resources.async_create_item(
+            {"res_type": "module", "url": versioned_url}
+        )
+        return True
+    except Exception:  # noqa: BLE001 - never let card registration break setup
+        return False
 
 
 def _manifest_version() -> str:

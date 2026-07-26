@@ -30,7 +30,7 @@ const DAY_ORDER = ["all", "weekday", "weekend", "mon", "tue", "wed", "thu", "fri
 
 // Shown in the card footer so you can confirm which card version is live
 // after a HACS update (keep in sync with manifest.json).
-const CARD_VERSION = "0.9.11";
+const CARD_VERSION = "0.9.12";
 
 // Escape user-controlled strings (room/zone/person names, error messages)
 // before interpolating into innerHTML — markup in a name must render as text.
@@ -895,6 +895,28 @@ class PrecisionClimateScheduleCard extends HTMLElement {
       boostBandHtml = `<div class="pcs-boost-band" style="left:${left.toFixed(3)}%;width:${width.toFixed(3)}%" title="Boosted to ${info.boost_target}°"></div>`;
     }
 
+    // Presence-window band: for a room with an occupancy sensor AND a configured
+    // window, mark the hours where presence rules the room (schedule rules
+    // outside). Wraps midnight -> two bands. No window -> presence rules 24h, so
+    // no band is needed.
+    let presenceBandHtml = "";
+    if (hasPresence) {
+      const ps = info.presence_start ? hhmmToMin(info.presence_start) : null;
+      const pe = info.presence_end ? hhmmToMin(info.presence_end) : null;
+      if (ps != null && pe != null && ps !== pe) {
+        const spans = ps < pe ? [[ps, pe]] : [[ps, 1440], [0, pe]];
+        const t = `Presence rules ${hhmm(info.presence_start)}–${hhmm(info.presence_end)} · schedule outside`;
+        presenceBandHtml = spans
+          .map(([s, e], i) => {
+            const left = (s / 1440) * 100;
+            const width = ((e - s) / 1440) * 100;
+            const label = i === 0 ? `<span class="pcs-presence-band-lbl">👤</span>` : "";
+            return `<div class="pcs-presence-band" style="left:${left.toFixed(3)}%;width:${width.toFixed(3)}%" title="${t}">${label}</div>`;
+          })
+          .join("");
+      }
+    }
+
     const dayKeys = Object.keys(room.blocks).sort(
       (a, b) => DAY_ORDER.indexOf(a) - DAY_ORDER.indexOf(b)
     );
@@ -924,6 +946,7 @@ class PrecisionClimateScheduleCard extends HTMLElement {
             </div>
             <div class="pcs-timeline-wrap">
               <div class="pcs-timeline">${segs}</div>
+              ${presenceBandHtml}
               ${boostBandHtml}
               <div class="pcs-needle"></div>
             </div>
@@ -1138,6 +1161,19 @@ const STYLE = `
     background: repeating-linear-gradient(45deg, rgba(139,92,246,.55), rgba(139,92,246,.55) 6px, rgba(139,92,246,.30) 6px, rgba(139,92,246,.30) 12px);
     border-left: 2px solid #8b5cf6; border-right: 2px solid #8b5cf6;
     pointer-events: none;
+  }
+
+  /* Presence-rules window: a translucent bracket over the timeline marking the
+     hours where an occupancy sensor rules the room (schedule rules outside). */
+  .pcs-presence-band {
+    position: absolute; top: 0; bottom: 0;
+    background: rgba(99,102,241,.16);
+    border-left: 2px solid #6366f1; border-right: 2px solid #6366f1;
+    pointer-events: none;
+  }
+  .pcs-presence-band-lbl {
+    position: absolute; top: 1px; left: 3px; font-size: .78em; line-height: 1;
+    opacity: .95; pointer-events: none;
   }
 
   /* Day row */

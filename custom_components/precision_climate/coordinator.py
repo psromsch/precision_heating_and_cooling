@@ -344,12 +344,21 @@ class PrecisionClimateCoordinator:
                 self.hass, entities, self._handle_room_presence_event
             )
         )
-        # Seed the dwell timers from each sensor's current state so a room that
-        # is already occupied at startup confirms after its on-delay (rather
-        # than never, if the sensor doesn't change again).
+        # Seed each room's CONFIRMED presence state immediately from the
+        # sensor's current value at startup. The dwell delay only exists to
+        # debounce live transitions; at boot the sensor is already settled, so
+        # applying it right away preserves the pre-restart state instead of
+        # briefly falling back to the schedule (which would, e.g., flip a
+        # confirmed-vacant room to active for the length of the off-dwell).
         for entity, room_id in self._presence_entity_to_room.items():
             state = self.hass.states.get(entity)
-            self._schedule_presence_confirm(room_id, entity, state)
+            if state is not None and state.state not in (
+                STATE_UNAVAILABLE,
+                STATE_UNKNOWN,
+            ):
+                self._room_presence[room_id] = (
+                    PRESENCE_PRESENT if state.state == STATE_ON else PRESENCE_ABSENT
+                )
 
     # --- Per-room presence (occupancy) --------------------------------------
 

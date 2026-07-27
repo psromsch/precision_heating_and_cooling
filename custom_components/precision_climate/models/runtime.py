@@ -174,6 +174,14 @@ class RuntimeConfig:
             return None
 
     @property
+    def child_lock_relock_after_boost(self) -> bool:
+        """Whether to re-enable a room's child lock shortly after a boost."""
+        from ..const import CONF_CHILD_LOCK_RELOCK, DEFAULT_CHILD_LOCK_RELOCK
+
+        val = self.settings.get(CONF_CHILD_LOCK_RELOCK)
+        return DEFAULT_CHILD_LOCK_RELOCK if val is None else bool(val)
+
+    @property
     def soft_away_entity(self) -> str | None:
         """The alarm_control_panel that triggers soft away, or None."""
         from ..const import CONF_SOFT_AWAY_ENTITY

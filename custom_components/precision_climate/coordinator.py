@@ -46,6 +46,7 @@ import homeassistant.util.dt as dt_util
 
 from .const import (
     ABSENT_ACTION_PASSIVE,
+    CHILD_LOCK_RELOCK_SECONDS,
     DEFAULT_OVERHEAT_THRESHOLD,
     DOMAIN,
     Mode,
@@ -127,6 +128,8 @@ class PrecisionClimateCoordinator:
         # back to the block sentinel (the hands-off contract survives reboots).
         self._room_boost: dict[str, dict] = {}
         self._boost_unsub: dict[str, object] = {}
+        # Pending "re-lock the child lock after a boost" timers, per room.
+        self._child_relock_unsub: dict[str, object] = {}
         self._boost_store: Store | None = (
             Store(hass, 1, f"{DOMAIN}_{entry_id}_room_boost")
             if entry_id is not None
@@ -424,6 +427,10 @@ class PrecisionClimateCoordinator:
             self._boundary_unsub = None
         for room_id in list(self._boost_unsub):
             self._cancel_boost_timer(room_id)
+        for room_id in list(self._child_relock_unsub):
+            unsub = self._child_relock_unsub.pop(room_id, None)
+            if unsub is not None:
+                unsub()
         self._cancel_grace_timer()
         self._cancel_presence_timers()
         if self._runtime_tick_unsub is not None:
@@ -1348,8 +1355,33 @@ class PrecisionClimateCoordinator:
         self._boost_unsub[room_id] = async_call_later(
             self.hass, hours * 3600.0, self._make_boost_expiry(room_id)
         )
+        self._schedule_child_relock(room_id)
         self._save_boosts()
         await self.async_evaluate()
+
+    def _schedule_child_relock(self, room_id: str) -> None:
+        """Re-enable this room's child lock a short time after a boost starts, so
+        a TRV unlocked to dial a boost by hand re-locks on its own. The timer
+        resets on each boost touch, so the lock never returns mid-adjustment."""
+        if not self.config.child_lock_relock_after_boost:
+            return
+        room = self.config.room_by_id(room_id)
+        if room is None or not room.child_lock_entities:
+            return
+        unsub = self._child_relock_unsub.pop(room_id, None)
+        if unsub is not None:
+            unsub()
+        self._child_relock_unsub[room_id] = async_call_later(
+            self.hass, CHILD_LOCK_RELOCK_SECONDS, self._make_child_relock(room_id)
+        )
+
+    def _make_child_relock(self, room_id: str):
+        @callback
+        def _relock(_now) -> None:
+            self._child_relock_unsub.pop(room_id, None)
+            self.hass.async_create_task(self.async_set_room_child_lock(room_id, True))
+
+        return _relock
 
     async def async_cancel_room_boost(self, room_id: str) -> None:
         """End a room's boost immediately and return it to its schedule."""

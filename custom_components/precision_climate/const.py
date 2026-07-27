@@ -144,6 +144,12 @@ CONF_SOFT_AWAY_STATES = "soft_away_states"     # armed states that trigger it
 DEFAULT_SOFT_AWAY_DELTA = 2.0
 DEFAULT_SOFT_AWAY_STATES = ["armed_away", "armed_vacation"]
 
+# Re-enable a room's child lock a short time after a manual boost starts, so you
+# can unlock a TRV to dial a boost by hand and the lock comes back on its own.
+CONF_CHILD_LOCK_RELOCK = "child_lock_relock_after_boost"
+DEFAULT_CHILD_LOCK_RELOCK = True
+CHILD_LOCK_RELOCK_SECONDS = 60.0
+
 # --- Failsafe default thresholds (seconds / degrees) -------------------------
 PROLONGED_HEATING_SECONDS = 5 * 60 * 60        # 5 hours of continuous boiler run
 TRV_MISMATCH_SECONDS = 10 * 60                 # boiler on 10 min with wrong TRV target

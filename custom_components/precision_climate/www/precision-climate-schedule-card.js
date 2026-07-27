@@ -30,7 +30,7 @@ const DAY_ORDER = ["all", "weekday", "weekend", "mon", "tue", "wed", "thu", "fri
 
 // Shown in the card footer so you can confirm which card version is live
 // after a HACS update (keep in sync with manifest.json).
-const CARD_VERSION = "0.9.13";
+const CARD_VERSION = "0.9.14";
 
 // Escape user-controlled strings (room/zone/person names, error messages)
 // before interpolating into innerHTML — markup in a name must render as text.
@@ -354,6 +354,8 @@ class PrecisionClimateScheduleCard extends HTMLElement {
       // Per-room child-lock entities + optimistic on-state (read from live state).
       child_lock_entities: {},
       child_lock_on: {},
+      // Re-lock the child lock a minute after a manual boost (default on).
+      child_lock_relock_after_boost: s.child_lock_relock_after_boost !== false,
       // Presence mode fields.
       presence_enabled: presenceEnabled,
       presence_persons: presencePersons,
@@ -419,6 +421,7 @@ class PrecisionClimateScheduleCard extends HTMLElement {
       soft_away_entity: draft.soft_away_entity || "",
       soft_away_delta: Number(draft.soft_away_delta) || 0,
       soft_away_states: draft.soft_away_states || [],
+      child_lock_relock_after_boost: !!draft.child_lock_relock_after_boost,
     };
     try {
       await this._hass.callService("precision_climate", "set_settings", {
@@ -678,13 +681,24 @@ class PrecisionClimateScheduleCard extends HTMLElement {
           </div>`;
         })
         .join("");
+      const relock = !!d.child_lock_relock_after_boost;
+      const relockToggle = `<div class="pcs-field pcs-childlock-field">
+          <label>Re-lock after a manual boost</label>
+          <button class="pcs-btn pcs-relock-toggle ${relock ? "pcs-primary" : ""}"
+            data-relock="${relock ? "0" : "1"}">${relock ? "On" : "Off"}</button>
+        </div>`;
       return `
         <div class="pcs-hint">
           Engage or release the child lock on each room's TRVs. Configure which
           entity is a TRV's child lock when you add or edit a room (Configure →
           the room form). Changes take effect immediately.
         </div>
-        ${rows}`;
+        ${rows}
+        <div class="pcs-hint">
+          When on, unlocking a TRV to dial a boost by hand re-enables that room's
+          child lock ~1 minute after the boost starts. Saved with Save.
+        </div>
+        ${relockToggle}`;
     }
     if (this._settingsTab === "presence") {
       const on = !!d.presence_enabled;
@@ -850,6 +864,15 @@ class PrecisionClimateScheduleCard extends HTMLElement {
         this._render();
       });
     });
+    const relockBtn = this._body.querySelector("[data-relock]");
+    if (relockBtn) {
+      relockBtn.addEventListener("click", () => {
+        this._syncSettingsFromDom();
+        this._settingsDraft.child_lock_relock_after_boost =
+          relockBtn.getAttribute("data-relock") === "1";
+        this._render();
+      });
+    }
     this._body
       .querySelector(".pcs-settings-cancel")
       .addEventListener("click", () => this._closeSettings());

@@ -46,6 +46,7 @@ import homeassistant.util.dt as dt_util
 
 from .const import (
     ABSENT_ACTION_PASSIVE,
+    CHILD_LOCK_RECENT_UNLOCK_SECONDS,
     CHILD_LOCK_RELOCK_SECONDS,
     DEFAULT_OVERHEAT_THRESHOLD,
     DOMAIN,
@@ -1362,11 +1363,18 @@ class PrecisionClimateCoordinator:
     def _schedule_child_relock(self, room_id: str) -> None:
         """Re-enable this room's child lock a short time after a boost starts, so
         a TRV unlocked to dial a boost by hand re-locks on its own. The timer
-        resets on each boost touch, so the lock never returns mid-adjustment."""
+        resets on each boost touch, so the lock never returns mid-adjustment.
+
+        Only fires when the lock was ON before the boost (it became unlocked
+        recently — the unlock-to-boost gesture). A lock that was already
+        deliberately unlocked is left unlocked, preserving the initial state.
+        """
         if not self.config.child_lock_relock_after_boost:
             return
         room = self.config.room_by_id(room_id)
         if room is None or not room.child_lock_entities:
+            return
+        if not self._child_lock_recently_unlocked(room):
             return
         unsub = self._child_relock_unsub.pop(room_id, None)
         if unsub is not None:
@@ -1374,6 +1382,29 @@ class PrecisionClimateCoordinator:
         self._child_relock_unsub[room_id] = async_call_later(
             self.hass, CHILD_LOCK_RELOCK_SECONDS, self._make_child_relock(room_id)
         )
+
+    def _child_lock_recently_unlocked(self, room) -> bool:
+        """True if the room's lock is currently unlocked but was locked until
+        recently. Fully-locked or long-unlocked rooms return False."""
+        now = dt_util.utcnow()
+        off_states = []
+        for entity_id in room.child_lock_entities:
+            state = self.hass.states.get(entity_id)
+            if state is None:
+                return False  # unknown lock -> don't touch it
+            if str(state.state).lower() in ("on", "locked"):
+                continue  # this lock is engaged
+            off_states.append(state)
+        if not off_states:
+            return False  # already fully locked -> nothing to restore
+        for state in off_states:
+            changed = state.last_changed
+            if (
+                changed is not None
+                and (now - changed).total_seconds() <= CHILD_LOCK_RECENT_UNLOCK_SECONDS
+            ):
+                return True
+        return False
 
     def _make_child_relock(self, room_id: str):
         @callback

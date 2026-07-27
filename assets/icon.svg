@@ -1,0 +1,33 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#232a36"/>
+      <stop offset="1" stop-color="#141922"/>
+    </linearGradient>
+    <linearGradient id="arc" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#3b78d9"/>
+      <stop offset="0.5" stop-color="#e0b341"/>
+      <stop offset="1" stop-color="#d9663b"/>
+    </linearGradient>
+    <filter id="soft" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="6" stdDeviation="10" flood-color="#000" flood-opacity="0.35"/>
+    </filter>
+  </defs>
+
+  <rect x="0" y="0" width="512" height="512" rx="112" fill="url(#bg)"/>
+
+  <!-- gauge arc: ~300deg, open at the bottom, blue(passive) -> red(active) -->
+  <path d="M181,386 A150,150 0 1 1 331,386"
+        fill="none" stroke="url(#arc)" stroke-width="34" stroke-linecap="round"/>
+
+  <!-- tick at the warm (active) end -->
+  <circle cx="331" cy="386" r="9" fill="#d9663b"/>
+  <circle cx="181" cy="386" r="9" fill="#3b78d9"/>
+
+  <!-- needle pointing to the warm side -->
+  <g filter="url(#soft)">
+    <path d="M256,256 L309,150 L266,246 Z" fill="#f4f6fb"/>
+    <circle cx="256" cy="256" r="30" fill="#f4f6fb"/>
+    <circle cx="256" cy="256" r="14" fill="#d9663b"/>
+  </g>
+</svg>

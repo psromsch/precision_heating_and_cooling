@@ -30,7 +30,7 @@ const DAY_ORDER = ["all", "weekday", "weekend", "mon", "tue", "wed", "thu", "fri
 
 // Shown in the card footer so you can confirm which card version is live
 // after a HACS update (keep in sync with manifest.json).
-const CARD_VERSION = "0.9.12";
+const CARD_VERSION = "0.9.13";
 
 // Escape user-controlled strings (room/zone/person names, error messages)
 // before interpolating into innerHTML — markup in a name must render as text.
@@ -55,6 +55,28 @@ const hhmmToMin = (s) => {
 function nowMinutes() {
   const d = new Date();
   return d.getHours() * 60 + d.getMinutes() + d.getSeconds() / 60;
+}
+
+// Split a block [bStart,bEnd) by presence-window spans into ordered pieces,
+// each flagged inside/outside the window. Used to colour the schedule-ruled
+// (outside) parts of a presence room's block with their real active/passive.
+function segmentPieces(bStart, bEnd, spans) {
+  const insides = [];
+  for (const [s, e] of spans) {
+    const a = Math.max(bStart, s);
+    const b = Math.min(bEnd, e);
+    if (a < b) insides.push([a, b]);
+  }
+  insides.sort((x, y) => x[0] - y[0]);
+  const pieces = [];
+  let cursor = bStart;
+  for (const [a, b] of insides) {
+    if (a > cursor) pieces.push({ start: cursor, end: a, inside: false });
+    pieces.push({ start: a, end: b, inside: true });
+    cursor = b;
+  }
+  if (cursor < bEnd) pieces.push({ start: cursor, end: bEnd, inside: false });
+  return pieces;
 }
 
 class PrecisionClimateScheduleCard extends HTMLElement {
@@ -899,22 +921,28 @@ class PrecisionClimateScheduleCard extends HTMLElement {
     // window, mark the hours where presence rules the room (schedule rules
     // outside). Wraps midnight -> two bands. No window -> presence rules 24h, so
     // no band is needed.
-    let presenceBandHtml = "";
+    // Presence window as non-wrapping [start,end] minute spans, or null when the
+    // room has no sensor / no window (presence then rules the whole day).
+    let presenceWindowSpans = null;
     if (hasPresence) {
       const ps = info.presence_start ? hhmmToMin(info.presence_start) : null;
       const pe = info.presence_end ? hhmmToMin(info.presence_end) : null;
       if (ps != null && pe != null && ps !== pe) {
-        const spans = ps < pe ? [[ps, pe]] : [[ps, 1440], [0, pe]];
-        const t = `Presence rules ${hhmm(info.presence_start)}–${hhmm(info.presence_end)} · schedule outside`;
-        presenceBandHtml = spans
-          .map(([s, e], i) => {
-            const left = (s / 1440) * 100;
-            const width = ((e - s) / 1440) * 100;
-            const label = i === 0 ? `<span class="pcs-presence-band-lbl">👤</span>` : "";
-            return `<div class="pcs-presence-band" style="left:${left.toFixed(3)}%;width:${width.toFixed(3)}%" title="${t}">${label}</div>`;
-          })
-          .join("");
+        presenceWindowSpans = ps < pe ? [[ps, pe]] : [[ps, 1440], [0, pe]];
       }
+    }
+
+    let presenceBandHtml = "";
+    if (presenceWindowSpans) {
+      const t = `Presence rules ${hhmm(info.presence_start)}–${hhmm(info.presence_end)} · schedule outside`;
+      presenceBandHtml = presenceWindowSpans
+        .map(([s, e], i) => {
+          const left = (s / 1440) * 100;
+          const width = ((e - s) / 1440) * 100;
+          const label = i === 0 ? `<span class="pcs-presence-band-lbl">👤</span>` : "";
+          return `<div class="pcs-presence-band" style="left:${left.toFixed(3)}%;width:${width.toFixed(3)}%" title="${t}">${label}</div>`;
+        })
+        .join("");
     }
 
     const dayKeys = Object.keys(room.blocks).sort(
@@ -925,11 +953,27 @@ class PrecisionClimateScheduleCard extends HTMLElement {
         const blocks = (room.blocks[key] || []).slice().sort((a, b) => a.start_min - b.start_min);
         const segs = blocks
           .map((b) => {
-            const w = ((b.end_min - b.start_min) / 1440) * 100;
-            // Presence rooms: neutral segment (active/passive is dynamic), show
-            // only the target. Others keep the active/passive colouring.
-            const cls = hasPresence ? "presence" : b.is_active ? "active" : "passive";
             const timeRange = `${minToHHMM(b.start_min)}–${minToHHMM(b.end_min)}`;
+            // Presence room WITH a window: split the block at the window edges so
+            // the parts OUTSIDE it show the real schedule colour (active/passive
+            // — the schedule rules there), and the part inside stays neutral
+            // (occupancy rules). Rooms without a window keep the plain rendering.
+            if (hasPresence && presenceWindowSpans) {
+              return segmentPieces(b.start_min, b.end_min, presenceWindowSpans)
+                .map((p) => {
+                  const w = ((p.end - p.start) / 1440) * 100;
+                  const cls = p.inside ? "presence" : b.is_active ? "active" : "passive";
+                  const tip = p.inside
+                    ? `${b.target}°C (${timeRange}) — occupancy rules`
+                    : `${b.target}°C (${timeRange}) — schedule ${b.is_active ? "active" : "passive"}`;
+                  const lbl = w > 4 ? `<span class="pcs-seg-label">${b.target}°</span>` : "";
+                  return `<div class="pcs-seg ${cls}" style="width:${w.toFixed(4)}%" title="${tip}">${lbl}</div>`;
+                })
+                .join("");
+            }
+            const w = ((b.end_min - b.start_min) / 1440) * 100;
+            // Presence room (no window) -> neutral; others -> active/passive.
+            const cls = hasPresence ? "presence" : b.is_active ? "active" : "passive";
             const tooltip = hasPresence
               ? `${b.target}°C (${timeRange}) — active/passive set by occupancy`
               : `${b.target}°C (${timeRange}) ${b.is_active ? "active" : "passive"}`;

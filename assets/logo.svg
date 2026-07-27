@@ -1,0 +1,23 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1040" height="260" viewBox="0 0 1040 260">
+  <defs>
+    <linearGradient id="panel" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#1c222d"/><stop offset="1" stop-color="#11151d"/>
+    </linearGradient>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#2a3140"/><stop offset="1" stop-color="#161b24"/>
+    </linearGradient>
+    <linearGradient id="arc" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#3b78d9"/><stop offset="0.5" stop-color="#e0b341"/><stop offset="1" stop-color="#d9663b"/>
+    </linearGradient>
+  </defs>
+  <rect x="0" y="0" width="1040" height="260" rx="44" fill="url(#panel)"/>
+  <g transform="translate(28,24) scale(0.4141)">
+    <rect width="512" height="512" rx="112" fill="url(#bg)"/>
+    <path d="M181,386 A150,150 0 1 1 331,386" fill="none" stroke="url(#arc)" stroke-width="34" stroke-linecap="round"/>
+    <circle cx="331" cy="386" r="9" fill="#d9663b"/><circle cx="181" cy="386" r="9" fill="#3b78d9"/>
+    <path d="M256,256 L309,150 L266,246 Z" fill="#f4f6fb"/>
+    <circle cx="256" cy="256" r="30" fill="#f4f6fb"/><circle cx="256" cy="256" r="14" fill="#d9663b"/>
+  </g>
+  <text x="268" y="122" font-family="DejaVu Sans, Verdana, sans-serif" font-size="72" fill="#f4f6fb" letter-spacing="1">Precision Climate</text>
+  <text x="270" y="174" font-family="DejaVu Sans, Verdana, sans-serif" font-size="31" fill="#9aa4b2">Per-room heating for a single boiler</text>
+</svg>

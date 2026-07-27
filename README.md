@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="https://raw.githubusercontent.com/psromsch/precision_heating_and_cooling/main/assets/logo.png" alt="Precision Climate" width="520">
+</p>
+
 # Precision Climate
 
 **Per-room heating control for a single shared boiler — that does exactly what you tell it, and nothing you didn't.**

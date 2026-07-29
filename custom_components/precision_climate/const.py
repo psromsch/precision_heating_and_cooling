@@ -149,6 +149,10 @@ DEFAULT_SOFT_AWAY_STATES = ["armed_away", "armed_vacation"]
 CONF_CHILD_LOCK_RELOCK = "child_lock_relock_after_boost"
 DEFAULT_CHILD_LOCK_RELOCK = True
 CHILD_LOCK_RELOCK_SECONDS = 60.0
+# Only re-lock if the lock became unlocked within this window before the boost
+# (i.e. you unlocked it to boost). A lock that has been off longer was left
+# unlocked on purpose, so it stays unlocked — the initial state is preserved.
+CHILD_LOCK_RECENT_UNLOCK_SECONDS = 300.0
 
 # Optional automatic ACTION attached to a failsafe warning, on top of the
 # notification. Room-scoped warnings can pause / away / force-passive the

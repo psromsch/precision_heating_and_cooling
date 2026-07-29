@@ -29,6 +29,7 @@ from .const import (
     CONF_BOILER_SWITCH,
     CONF_CHILD_LOCKS,
     CONF_DEFAULT_ROOM,
+    CONF_FAILSAFE_ACTIONS,
     CONF_LOWER_HYSTERESIS,
     CONF_NOTIFICATIONS,
     CONF_NOTIFY_SERVICES,
@@ -57,6 +58,13 @@ from .const import (
     CONF_WINDOWS,
     ABSENT_ACTION_AWAY,
     ABSENT_ACTION_PASSIVE,
+    FAILSAFE_ACTION_AWAY,
+    FAILSAFE_ACTION_BOILER_OFF,
+    FAILSAFE_ACTION_NONE,
+    FAILSAFE_ACTION_PASSIVE,
+    FAILSAFE_ACTION_PAUSE,
+    FAILSAFE_GLOBAL_KEYS,
+    FAILSAFE_ROOM_KEYS,
     DEFAULT_ROOM_PRESENCE_OFF_MINUTES,
     DEFAULT_ROOM_PRESENCE_ON_MINUTES,
     DEFAULT_SUNNY_END_MIN,
@@ -290,6 +298,7 @@ class PrecisionClimateOptionsFlow(config_entries.OptionsFlow):
         self._default_room = merged.get(CONF_DEFAULT_ROOM)
         self._notify_services = list(merged.get(CONF_NOTIFY_SERVICES, []))
         self._notifications = dict(merged.get(CONF_NOTIFICATIONS, {}))
+        self._failsafe_actions = dict(merged.get(CONF_FAILSAFE_ACTIONS, {}))
         self._sunny = dict(merged.get(CONF_SUNNY_DAY, {}))
         # Global settings (boost/away/...) are managed from the card's config
         # panel via the set_settings service. Preserve them so editing a room
@@ -319,6 +328,7 @@ class PrecisionClimateOptionsFlow(config_entries.OptionsFlow):
             CONF_DEFAULT_ROOM: self._default_room,
             CONF_NOTIFY_SERVICES: self._notify_services,
             CONF_NOTIFICATIONS: self._notifications,
+            CONF_FAILSAFE_ACTIONS: self._failsafe_actions,
             CONF_SUNNY_DAY: self._sunny,
             CONF_SETTINGS: self._settings,
         }
@@ -541,6 +551,10 @@ class PrecisionClimateOptionsFlow(config_entries.OptionsFlow):
             self._notifications = {
                 kind: user_input.get(f"notify_{kind}", True) for kind in NOTIFICATION_KINDS
             }
+            self._failsafe_actions = {
+                key: user_input.get(f"action_{key}", FAILSAFE_ACTION_NONE)
+                for key in (*FAILSAFE_ROOM_KEYS, *FAILSAFE_GLOBAL_KEYS)
+            }
             sunny = {CONF_SUNNY_ENABLED: user_input.get(CONF_SUNNY_ENABLED, False)}
             if sunny[CONF_SUNNY_ENABLED]:
                 sunny.update(
@@ -614,6 +628,37 @@ class PrecisionClimateOptionsFlow(config_entries.OptionsFlow):
             schema_dict[
                 vol.Required(f"notify_{kind}", default=self._notifications.get(kind, True))
             ] = bool
+
+        # Optional automatic action per warning, alongside the notification.
+        room_action_opts = [
+            FAILSAFE_ACTION_NONE,
+            FAILSAFE_ACTION_PAUSE,
+            FAILSAFE_ACTION_AWAY,
+            FAILSAFE_ACTION_PASSIVE,
+        ]
+        global_action_opts = [FAILSAFE_ACTION_NONE, FAILSAFE_ACTION_BOILER_OFF]
+        for key in FAILSAFE_ROOM_KEYS:
+            schema_dict[
+                vol.Required(
+                    f"action_{key}",
+                    default=self._failsafe_actions.get(key, FAILSAFE_ACTION_NONE),
+                )
+            ] = selector.SelectSelector(
+                selector.SelectSelectorConfig(
+                    options=room_action_opts, translation_key="failsafe_action"
+                )
+            )
+        for key in FAILSAFE_GLOBAL_KEYS:
+            schema_dict[
+                vol.Required(
+                    f"action_{key}",
+                    default=self._failsafe_actions.get(key, FAILSAFE_ACTION_NONE),
+                )
+            ] = selector.SelectSelector(
+                selector.SelectSelectorConfig(
+                    options=global_action_opts, translation_key="failsafe_action"
+                )
+            )
 
         return self.async_show_form(
             step_id="settings",

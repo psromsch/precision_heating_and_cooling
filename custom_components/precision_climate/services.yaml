@@ -55,6 +55,28 @@ set_room_pause:
       selector:
         boolean:
 
+set_room_forced_passive:
+  name: Force a room passive (or clear it)
+  description: >
+    Force a room passive so it stops driving the boiler (its target is
+    unchanged), or clear that state. Used by failsafe actions and the schedule
+    card's "clear forced passive" button.
+  fields:
+    room_id:
+      name: Room ID
+      description: The room's id (slug), e.g. living.
+      required: true
+      example: living
+      selector:
+        text:
+    on:
+      name: On
+      description: true to force passive, false to clear.
+      required: true
+      example: false
+      selector:
+        boolean:
+
 set_room_boost:
   name: Boost or cancel a room's boost
   description: >

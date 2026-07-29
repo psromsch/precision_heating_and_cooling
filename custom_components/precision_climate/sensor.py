@@ -78,6 +78,7 @@ class SystemStatusSensor(PrecisionBaseEntity, SensorEntity):
                 "heating": c.room_heating.get(rid),
                 "paused": c.room_paused(rid),
                 "room_away": c.room_away(rid),
+                "forced_passive": c.room_forced_passive(rid),
                 "boosted": boost is not None,
                 "boost_target": boost["target"] if boost else None,
                 "boost_expires": boost["expires"].isoformat() if boost else None,

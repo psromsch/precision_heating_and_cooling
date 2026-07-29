@@ -184,6 +184,29 @@ def test_boost_overrules_soft_away():
     ) == (22.0, True)
 
 
+def test_forced_passive_stops_active_keeps_target():
+    # A sticky failsafe action: room can't drive the boiler, target unchanged.
+    assert resolve(schedule_active=True, forced_passive=True) == (20.0, False)
+    assert resolve(schedule_active=False, forced_passive=True) == (20.0, False)
+
+
+def test_forced_passive_under_global_away_keeps_capped_target_passive():
+    assert resolve(
+        schedule_active=True, global_away=True, forced_passive=True
+    ) == (15.0, False)
+
+
+def test_forced_passive_with_soft_away_lowers_target_and_passive():
+    assert resolve(
+        soft_away_active=True, soft_away_delta=2.0, forced_passive=True
+    ) == (18.0, False)
+
+
+def test_boost_overrides_forced_passive():
+    # An explicit boost still heats even if a failsafe forced the room passive.
+    assert resolve(boost_target=22.0, forced_passive=True) == (22.0, True)
+
+
 def test_soft_away_with_presence_absent_away_uses_away():
     # Presence sends the room to away -> away wins over soft away.
     assert resolve(

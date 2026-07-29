@@ -166,6 +166,8 @@ Precision Climate watches reality, not just its own intentions, and will alert y
 
 If an active room's thermometer goes offline, that room is safely excluded (its valve closes) rather than trusted blindly; if *all* active thermometers are offline, the boiler stops.
 
+**Optional actions on a warning.** Beyond notifying, each warning can take an automatic, sticky action (in the integration's Options, next to the notification toggles). Room warnings (overheating, TRV mismatch/unresponsive/unavailable) can **pause**, **set away**, or **force passive** the affected room; system warnings (unauthorized boiler, prolonged heating) can **turn the heating master off**. The action holds until you clear it — so, for example, a TRV that drops off Zigbee overnight can pause its room and stop the boiler running until morning instead of just pinging you.
+
 ---
 
 ## The dashboard cards

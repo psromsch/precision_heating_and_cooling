@@ -49,6 +49,11 @@ from .const import (
     CHILD_LOCK_RECENT_UNLOCK_SECONDS,
     CHILD_LOCK_RELOCK_SECONDS,
     DEFAULT_OVERHEAT_THRESHOLD,
+    FAILSAFE_ACTION_AWAY,
+    FAILSAFE_ACTION_BOILER_OFF,
+    FAILSAFE_ACTION_NONE,
+    FAILSAFE_ACTION_PASSIVE,
+    FAILSAFE_ACTION_PAUSE,
     DOMAIN,
     Mode,
     PAUSE_TARGET,
@@ -113,6 +118,10 @@ class PrecisionClimateCoordinator:
         # Per-room pause: paused rooms get their target dropped to PAUSE_TARGET
         # until resumed. Set is seeded by the per-room pause switches on restore.
         self._room_paused: set[str] = set()
+        # Rooms forced passive by a sticky failsafe action (stop driving the
+        # boiler, target unchanged) until manually cleared. Not persisted: a
+        # still-broken TRV re-fires the warning and re-applies the action.
+        self._room_forced_passive: set[str] = set()
         # Per-room away: each room's target is capped at its away_target while it
         # is in this set. Manual-only (no timer); independent from global away.
         # Persisted via _room_away_store so it survives reloads without triggering one.
@@ -704,6 +713,7 @@ class PrecisionClimateCoordinator:
                 absent_action=(cfg.absent_action if cfg else ABSENT_ACTION_PASSIVE),
                 soft_away_active=soft_away,
                 soft_away_delta=soft_away_delta,
+                forced_passive=r.room_id in self._room_forced_passive,
             )
         self.resolved_targets = {r.room_id: r.target for r in resolved}
         self.resolved_active = {r.room_id: r.is_active for r in resolved}
@@ -828,11 +838,11 @@ class PrecisionClimateCoordinator:
         )
         if self._unauthorized.update(mono, unauthorized):
             self.hass.async_create_task(self._set_switch(self.config.boiler_switch, False))
-            self._notify("unauthorized_boiler", "Boiler was on without authorization; forced off.")
+            self._failsafe("unauthorized_boiler", "Boiler was on without authorization; forced off.")
 
         # Prolonged heating (system-wide boiler runtime).
         if self._prolonged.update(mono, self._boiler_on):
-            self._notify("prolonged_heating", "Boiler has been running for over 5 hours.")
+            self._failsafe("prolonged_heating", "Boiler has been running for over 5 hours.")
 
         for cfg in self.config.rooms:
             room = rooms_by_id.get(cfg.room_id)
@@ -846,9 +856,10 @@ class PrecisionClimateCoordinator:
             if is_overheating(room.temperature, heating, DEFAULT_OVERHEAT_THRESHOLD):
                 if cfg.room_id not in self._overheat_alerted:
                     self._overheat_alerted.add(cfg.room_id)
-                    self._notify(
+                    self._failsafe(
                         "overheating",
                         f"{cfg.name} is overheating ({room.temperature}°C).",
+                        cfg.room_id,
                     )
             else:
                 self._overheat_alerted.discard(cfg.room_id)
@@ -860,9 +871,10 @@ class PrecisionClimateCoordinator:
                     self._boiler_on, should_heat, self._trv_target(trv), room.target
                 ):
                     if self._mismatch[cfg.room_id].update(mono, True):
-                        self._notify(
+                        self._failsafe(
                             "trv_mismatch",
                             f"{cfg.name}: TRV {trv} target is below the schedule target while heating.",
+                            cfg.room_id,
                         )
                     break
             else:
@@ -870,16 +882,21 @@ class PrecisionClimateCoordinator:
 
             # TRV unresponsive (heating 45 min but the room got colder).
             if self._unresponsive[cfg.room_id].update(mono, heating, room.temperature):
-                self._notify(
+                self._failsafe(
                     "trv_unresponsive",
                     f"{cfg.name}: heating 45 min but the room lost temperature; check window/TRV.",
+                    cfg.room_id,
                 )
 
             # TRV unavailable (offline while the room is heating).
             for trv in cfg.trvs:
                 cond = self._unavailable[trv].update(mono, heating and self._trv_unavailable(trv))
                 if cond:
-                    self._notify("trv_unavailable", f"{cfg.name}: TRV {trv} unavailable while heating.")
+                    self._failsafe(
+                        "trv_unavailable",
+                        f"{cfg.name}: TRV {trv} unavailable while heating.",
+                        cfg.room_id,
+                    )
 
     # --- HA service helpers --------------------------------------------------
 
@@ -928,6 +945,35 @@ class PrecisionClimateCoordinator:
             {ATTR_ENTITY_ID: entity_id, "hvac_mode": hvac_mode},
             blocking=False,
         )
+
+    def _failsafe(self, key: str, message: str, room_id: str | None = None) -> None:
+        """Notify about a failsafe warning and apply its configured action, if
+        any. Actions are sticky — the room stays paused/away/passive (or the
+        master stays off) until manually cleared. The notification says what
+        was done. Safe to call from inside the evaluate lock: the action is
+        scheduled as a task so it runs after the lock is released."""
+        action = self.config.failsafe_action(key)
+        suffix = {
+            FAILSAFE_ACTION_PAUSE: " Room paused until you resume it.",
+            FAILSAFE_ACTION_AWAY: " Room set to away until you clear it.",
+            FAILSAFE_ACTION_PASSIVE: " Room forced passive until you clear it.",
+            FAILSAFE_ACTION_BOILER_OFF: " Heating master turned off until you re-enable it.",
+        }.get(action, "")
+        self._notify(key, message + suffix)
+        if action and action != FAILSAFE_ACTION_NONE:
+            self.hass.async_create_task(
+                self._apply_failsafe_action(action, room_id)
+            )
+
+    async def _apply_failsafe_action(self, action: str, room_id: str | None) -> None:
+        if action == FAILSAFE_ACTION_PAUSE and room_id:
+            await self.async_set_room_paused(room_id, True)
+        elif action == FAILSAFE_ACTION_AWAY and room_id:
+            await self.async_set_room_away(room_id, True)
+        elif action == FAILSAFE_ACTION_PASSIVE and room_id:
+            await self.async_set_room_forced_passive(room_id, True)
+        elif action == FAILSAFE_ACTION_BOILER_OFF:
+            await self.async_set_master(False)
 
     def _notify(self, kind: str, message: str) -> None:
         """Send a notification if this kind is enabled (default: enabled)."""
@@ -1258,6 +1304,16 @@ class PrecisionClimateCoordinator:
             self._room_paused.add(room_id)
         else:
             self._room_paused.discard(room_id)
+        await self.async_evaluate()
+
+    def room_forced_passive(self, room_id: str) -> bool:
+        return room_id in self._room_forced_passive
+
+    async def async_set_room_forced_passive(self, room_id: str, on: bool) -> None:
+        if on:
+            self._room_forced_passive.add(room_id)
+        else:
+            self._room_forced_passive.discard(room_id)
         await self.async_evaluate()
 
     def room_away(self, room_id: str) -> bool:

@@ -149,6 +149,30 @@ DEFAULT_SOFT_AWAY_STATES = ["armed_away", "armed_vacation"]
 CONF_CHILD_LOCK_RELOCK = "child_lock_relock_after_boost"
 DEFAULT_CHILD_LOCK_RELOCK = True
 CHILD_LOCK_RELOCK_SECONDS = 60.0
+
+# Optional automatic ACTION attached to a failsafe warning, on top of the
+# notification. Room-scoped warnings can pause / away / force-passive the
+# affected room; global warnings can force the boiler off (master off). All
+# actions are sticky — they stay until you manually clear them. Stored in entry
+# data as {warning_key: action}.
+CONF_FAILSAFE_ACTIONS = "failsafe_actions"
+FAILSAFE_ACTION_NONE = "none"
+FAILSAFE_ACTION_PAUSE = "pause"
+FAILSAFE_ACTION_AWAY = "away"
+FAILSAFE_ACTION_PASSIVE = "passive"
+FAILSAFE_ACTION_BOILER_OFF = "boiler_off"
+# Warnings that target one room (action: none/pause/away/passive).
+FAILSAFE_ROOM_KEYS = (
+    "overheating",
+    "trv_mismatch",
+    "trv_unresponsive",
+    "trv_unavailable",
+)
+# System-wide warnings (action: none/boiler_off).
+FAILSAFE_GLOBAL_KEYS = (
+    "unauthorized_boiler",
+    "prolonged_heating",
+)
 # Only re-lock if the lock became unlocked within this window before the boost
 # (i.e. you unlocked it to boost). A lock that has been off longer was left
 # unlocked on purpose, so it stays unlocked — the initial state is preserved.

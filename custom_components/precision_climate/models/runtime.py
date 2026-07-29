@@ -18,6 +18,7 @@ from ..const import (
     CONF_CHILD_LOCKS,
     CONF_DEFAULT_ROOM,
     CONF_LOWER_HYSTERESIS,
+    CONF_FAILSAFE_ACTIONS,
     CONF_NOTIFICATIONS,
     CONF_NOTIFY_SERVICE,
     CONF_NOTIFY_SERVICES,
@@ -146,11 +147,19 @@ class RuntimeConfig:
     presence: PresenceConfig = field(default_factory=PresenceConfig)
     notify_services: list[str] = field(default_factory=list)
     notifications: dict[str, bool] = field(default_factory=dict)
+    # Optional per-warning failsafe action, {warning_key: action}.
+    failsafe_actions: dict[str, str] = field(default_factory=dict)
     # Global settings managed from the card's config panel (boost, away, ...).
     settings: dict = field(default_factory=dict)
 
     def room_by_id(self, room_id: str) -> RoomConfig | None:
         return next((r for r in self.rooms if r.room_id == room_id), None)
+
+    def failsafe_action(self, warning_key: str) -> str:
+        """The configured action for a warning, or 'none'."""
+        from ..const import FAILSAFE_ACTION_NONE
+
+        return self.failsafe_actions.get(warning_key) or FAILSAFE_ACTION_NONE
 
     @property
     def boost_duration_hours(self) -> float:
@@ -355,5 +364,6 @@ def build_runtime(data: dict) -> RuntimeConfig:
         presence=presence,
         notify_services=notify_services,
         notifications=dict(data.get(CONF_NOTIFICATIONS, {})),
+        failsafe_actions=dict(data.get(CONF_FAILSAFE_ACTIONS, {})),
         settings=settings,
     )

@@ -51,6 +51,7 @@ def resolve_room_mode(
     absent_action: str = "passive",
     soft_away_active: bool = False,
     soft_away_delta: float = 0.0,
+    forced_passive: bool = False,
 ) -> tuple[float, bool]:
     """Return the effective ``(target, is_active)`` for a room this cycle."""
     # 1. Boost wins over everything.
@@ -86,12 +87,15 @@ def resolve_room_mode(
             target = min(target, away_target)
         return target, False
 
-    # 5. Global away: cap the target only, keep the active flag so the boiler can
-    #    still be driven to hold the away temperature. Overrules soft away.
+    # forced_passive (a sticky failsafe action) stops the room driving the
+    # boiler, without changing its target. It applies to every non-away path
+    # below; the away paths are already passive.
     if global_away:
+        # Global away: cap the target only, keep the active flag so the boiler
+        # can still be driven to hold the away temperature. Overrules soft away.
         if away_target is not None:
             target = min(target, away_target)
-        return target, active
+        return target, active and not forced_passive
 
     # 6. Soft away: no other away is in effect, so if the alarm is armed lower
     #    the target by the delta — but never below the away target (soft stays
@@ -102,4 +106,4 @@ def resolve_room_mode(
             reduced = max(reduced, away_target)
         target = reduced
 
-    return target, active
+    return target, active and not forced_passive

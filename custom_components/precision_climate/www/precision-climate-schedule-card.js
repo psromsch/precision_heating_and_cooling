@@ -30,7 +30,7 @@ const DAY_ORDER = ["all", "weekday", "weekend", "mon", "tue", "wed", "thu", "fri
 
 // Shown in the card footer so you can confirm which card version is live
 // after a HACS update (keep in sync with manifest.json).
-const CARD_VERSION = "0.9.14";
+const CARD_VERSION = "0.9.15";
 
 // Escape user-controlled strings (room/zone/person names, error messages)
 // before interpolating into innerHTML — markup in a name must render as text.
@@ -280,6 +280,21 @@ class PrecisionClimateScheduleCard extends HTMLElement {
       btn.addEventListener("click", () => {
         const [rid, flag] = btn.getAttribute("data-room-away").split("|");
         this._setRoomAway(rid, flag === "1");
+      });
+    });
+
+    this._body.querySelectorAll("[data-forced-passive]").forEach((btn) => {
+      btn.addEventListener("click", async () => {
+        const rid = btn.getAttribute("data-forced-passive");
+        try {
+          await this._hass.callService("precision_climate", "set_room_forced_passive", {
+            room_id: rid,
+            on: false,
+          });
+        } catch (err) {
+          this._error = (err && err.message) || "Could not clear forced passive.";
+          this._render();
+        }
       });
     });
 
@@ -915,6 +930,15 @@ class PrecisionClimateScheduleCard extends HTMLElement {
     const awayTarget = info.away_target != null ? `${Number(info.away_target).toFixed(1)}°` : "";
     const roomAwayBadge = roomAway ? `<span class="pcs-room-away-badge">🏠 away${awayTarget ? ` (${awayTarget})` : ""}</span>` : "";
     const roomAwayBtn = `<button class="pcs-btn pcs-room-away-btn ${roomAway ? "pcs-room-away-active" : ""}" data-room-away="${room.room_id}|${roomAway ? "0" : "1"}" title="${roomAway ? "Disable away for this room" : "Enable away for this room (caps at away target)"}">${roomAway ? "🏠 Room away" : "🏠 Away"}</button>`;
+    // Forced passive: set by a sticky failsafe action; shown only when active,
+    // with a clear button (no way to turn it on from here — it's a safety state).
+    const forcedPassive = !!info.forced_passive;
+    const forcedPassiveBadge = forcedPassive
+      ? `<span class="pcs-forced-passive-badge" title="A failsafe forced this room passive. Fix the TRV, then clear.">⚠ forced passive</span>`
+      : "";
+    const forcedPassiveBtn = forcedPassive
+      ? `<button class="pcs-btn pcs-forced-passive-btn" data-forced-passive="${room.room_id}" title="Clear the failsafe forced-passive state">✕ Clear forced passive</button>`
+      : "";
     const upBtn = `<button class="pcs-btn pcs-move-btn" data-move="${room.room_id}|up" title="Move room up"${index === 0 ? " disabled" : ""}>▲</button>`;
     const downBtn = `<button class="pcs-btn pcs-move-btn" data-move="${room.room_id}|down" title="Move room down"${index >= total - 1 ? " disabled" : ""}>▼</button>`;
     const moveBtns = `<span class="pcs-room-move">${upBtn}${downBtn}</span>`;
@@ -1027,8 +1051,8 @@ class PrecisionClimateScheduleCard extends HTMLElement {
 
     return `<div class="pcs-room${paused ? " pcs-room-paused" : ""}${boosted ? " pcs-room-boosted" : ""}${roomAway ? " pcs-room-away" : ""}">
       <div class="pcs-room-name">
-        <span class="pcs-room-name-text">${esc(room.name)}${modeBadge}${heatIcon}${tempSpan}${pausedBadge}${boostBadge}${roomAwayBadge}</span>
-        <span class="pcs-room-actions">${moveBtns}${boostBtn}${roomAwayBtn}${pauseBtn}</span>
+        <span class="pcs-room-name-text">${esc(room.name)}${modeBadge}${heatIcon}${tempSpan}${pausedBadge}${boostBadge}${roomAwayBadge}${forcedPassiveBadge}</span>
+        <span class="pcs-room-actions">${moveBtns}${boostBtn}${roomAwayBtn}${pauseBtn}${forcedPassiveBtn}</span>
       </div>
       ${days}
     </div>`;
@@ -1217,6 +1241,8 @@ const STYLE = `
   /* Per-room away mode */
   .pcs-room-away-badge { font-weight: 600; font-size: .72em; text-transform: uppercase; letter-spacing: .04em; padding: 1px 6px; border-radius: 8px; background: #2563eb; color: #fff; white-space: nowrap; }
   .pcs-room-away-btn { white-space: nowrap; }
+  .pcs-forced-passive-badge { font-weight: 700; font-size: .72em; letter-spacing: .03em; padding: 1px 6px; border-radius: 8px; background: #b45309; color: #fff; white-space: nowrap; }
+  .pcs-forced-passive-btn { white-space: nowrap; border-color: #b45309; color: #fbbf24; }
   .pcs-room-away-active { border-color: #2563eb; color: #93c5fd; font-weight: 600; }
   .pcs-room-away .pcs-timeline { opacity: .65; }
 

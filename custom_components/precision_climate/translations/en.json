@@ -99,7 +99,13 @@
           "notify_trv_unresponsive": "Notify: TRV unresponsive",
           "notify_trv_unavailable": "Notify: TRV unavailable",
           "notify_window": "Notify: window open",
-          "notify_sunny_day": "Notify: sunny-day savings"
+          "notify_sunny_day": "Notify: sunny-day savings",
+          "action_overheating": "On overheating, also…",
+          "action_trv_mismatch": "On TRV setpoint mismatch, also…",
+          "action_trv_unresponsive": "On TRV unresponsive, also…",
+          "action_trv_unavailable": "On TRV unavailable, also…",
+          "action_unauthorized_boiler": "On unauthorized boiler, also…",
+          "action_prolonged_heating": "On prolonged heating, also…"
         },
         "data_description": {
           "boiler_switch": "The switch that turns your boiler on and off. You can change it here without reinstalling.",
@@ -152,6 +158,15 @@
       "options": {
         "passive": "Passive (rides the boiler only)",
         "away": "Away (capped to the away target, passive)"
+      }
+    },
+    "failsafe_action": {
+      "options": {
+        "none": "Notify only",
+        "pause": "Notify + pause the room (until you resume it)",
+        "away": "Notify + set the room away (until you clear it)",
+        "passive": "Notify + force the room passive (until you clear it)",
+        "boiler_off": "Notify + turn the heating master off (until you re-enable it)"
       }
     }
   }

@@ -403,6 +403,17 @@ class PrecisionClimateCoordinator:
         if self._room_presence.get(room_id) == target:
             return  # already in this state; nothing to confirm
 
+        # First confirmed reading since startup — e.g. a template sensor that
+        # was still 'unavailable' when we seeded at setup, so it never got a
+        # baseline. Apply it IMMEDIATELY instead of dwelling: the dwell debounces
+        # transitions from a KNOWN state, but the initial value should be taken
+        # at face value. Otherwise a sensor that's been clear for hours makes the
+        # room start active and wait out the whole off-dwell after every restart.
+        if self._room_presence.get(room_id) is None:
+            self._room_presence[room_id] = target
+            self.hass.async_create_task(self.async_evaluate())
+            return
+
         cfg = self.config.room_by_id(room_id)
         if cfg is None:
             return

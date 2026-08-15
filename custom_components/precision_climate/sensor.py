@@ -123,6 +123,7 @@ class SystemStatusSensor(PrecisionBaseEntity, SensorEntity):
             # Holiday-away window (absolute start/end), or None if unset.
             "holiday_window": c.holiday_window,
             # Soft away (alarm-armed target reduction).
+            "respect_window_sensors": c.config.respect_window_sensors,
             "soft_away_on": c.soft_away_on,
             "soft_away_entity": c.config.soft_away_entity,
             "soft_away_delta": c.config.soft_away_delta,

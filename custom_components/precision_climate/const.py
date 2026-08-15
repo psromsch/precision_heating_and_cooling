@@ -65,6 +65,11 @@ CONF_ROOM_ORDER = "room_order"  # list[room_id] controlling card display order
 DEFAULT_BOOST_DURATION_HOURS = 1.0
 DEFAULT_AWAY_TARGET = 16.0
 
+# Global toggle: when False, open window sensors are ignored (no boiler hold).
+# Lets you temporarily suspend the window-hold feature. Stored in CONF_SETTINGS.
+CONF_RESPECT_WINDOWS = "respect_window_sensors"
+DEFAULT_RESPECT_WINDOWS = True
+
 # Per-room
 CONF_ROOM_ID = "room_id"
 CONF_ROOM_NAME = "name"

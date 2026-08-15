@@ -736,7 +736,9 @@ class PrecisionClimateCoordinator:
             res = resolved_by_id.get(cfg.room_id)
             if res is None:
                 continue  # uncovered slot; cannot participate this cycle
-            window_open = any(self._is_window_open(w) for w in cfg.windows)
+            window_open = self.config.respect_window_sensors and any(
+                self._is_window_open(w) for w in cfg.windows
+            )
             rooms.append(
                 RoomState(
                     room_id=cfg.room_id,

@@ -155,6 +155,14 @@ class RuntimeConfig:
     def room_by_id(self, room_id: str) -> RoomConfig | None:
         return next((r for r in self.rooms if r.room_id == room_id), None)
 
+    @property
+    def respect_window_sensors(self) -> bool:
+        """Whether an open window holds the boiler. False ignores windows."""
+        from ..const import CONF_RESPECT_WINDOWS, DEFAULT_RESPECT_WINDOWS
+
+        val = self.settings.get(CONF_RESPECT_WINDOWS)
+        return DEFAULT_RESPECT_WINDOWS if val is None else bool(val)
+
     def failsafe_action(self, warning_key: str) -> str:
         """The configured action for a warning, or 'none'."""
         from ..const import FAILSAFE_ACTION_NONE

@@ -30,7 +30,7 @@ const DAY_ORDER = ["all", "weekday", "weekend", "mon", "tue", "wed", "thu", "fri
 
 // Shown in the card footer so you can confirm which card version is live
 // after a HACS update (keep in sync with manifest.json).
-const CARD_VERSION = "0.9.15";
+const CARD_VERSION = "0.9.16";
 
 // Escape user-controlled strings (room/zone/person names, error messages)
 // before interpolating into innerHTML — markup in a name must render as text.
@@ -362,6 +362,7 @@ class PrecisionClimateScheduleCard extends HTMLElement {
     const holiday = (statusState && statusState.attributes.holiday_window) || {};
     this._settingsDraft = {
       boost_duration_hours: Number(s.boost_duration_hours ?? 1),
+      respect_window_sensors: statusState ? statusState.attributes.respect_window_sensors !== false : true,
       away_on: status ? status.attributes.away_on === true : false,
       away_switch_entity_id: status ? status.attributes.away_switch_entity_id || null : null,
       rooms: schedules.map((r) => ({ room_id: r.room_id, name: r.name })),
@@ -426,6 +427,7 @@ class PrecisionClimateScheduleCard extends HTMLElement {
     const draft = this._settingsDraft || {};
     const patch = {
       boost_duration_hours: Number(draft.boost_duration_hours) || 1,
+      respect_window_sensors: draft.respect_window_sensors !== false,
       away_targets: draft.away_targets || {},
       presence_enabled: !!draft.presence_enabled,
       presence_zone: draft.presence_zone || "",
@@ -595,6 +597,16 @@ class PrecisionClimateScheduleCard extends HTMLElement {
           When you change a TRV's target by hand, that room will be boosted to
           the temperature you set (and made active) for this many hours, then
           return to its schedule. Re-touching the TRV restarts the timer.
+        </div>
+        <div class="pcs-field pcs-childlock-field">
+          <label>Respect window sensors</label>
+          <button class="pcs-btn pcs-window-toggle ${d.respect_window_sensors ? "pcs-primary" : ""}"
+            data-window-respect="${d.respect_window_sensors ? "0" : "1"}">${d.respect_window_sensors ? "On" : "Off"}</button>
+        </div>
+        <div class="pcs-hint">
+          When on, an open window in an active room holds the boiler until the
+          window closes. Turn off to temporarily ignore all window sensors.
+          Saved with Save.
         </div>`;
     }
     if (this._settingsTab === "away") {
@@ -885,6 +897,15 @@ class PrecisionClimateScheduleCard extends HTMLElement {
         this._syncSettingsFromDom();
         this._settingsDraft.child_lock_relock_after_boost =
           relockBtn.getAttribute("data-relock") === "1";
+        this._render();
+      });
+    }
+    const windowBtn = this._body.querySelector("[data-window-respect]");
+    if (windowBtn) {
+      windowBtn.addEventListener("click", () => {
+        this._syncSettingsFromDom();
+        this._settingsDraft.respect_window_sensors =
+          windowBtn.getAttribute("data-window-respect") === "1";
         this._render();
       });
     }

@@ -30,7 +30,7 @@ const DAY_ORDER = ["all", "weekday", "weekend", "mon", "tue", "wed", "thu", "fri
 
 // Shown in the card footer so you can confirm which card version is live
 // after a HACS update (keep in sync with manifest.json).
-const CARD_VERSION = "0.9.16";
+const CARD_VERSION = "0.9.17";
 
 // Escape user-controlled strings (room/zone/person names, error messages)
 // before interpolating into innerHTML — markup in a name must render as text.
@@ -957,6 +957,12 @@ class PrecisionClimateScheduleCard extends HTMLElement {
     const forcedPassiveBadge = forcedPassive
       ? `<span class="pcs-forced-passive-badge" title="A failsafe forced this room passive. Fix the TRV, then clear.">⚠ forced passive</span>`
       : "";
+    // Window open -> this room is paused (valve closed, excluded from demand)
+    // until the window closes.
+    const windowOpen = info.window_open === true;
+    const windowBadge = windowOpen
+      ? `<span class="pcs-window-badge" title="Window open — this room is paused until it closes.">🪟 window open</span>`
+      : "";
     const forcedPassiveBtn = forcedPassive
       ? `<button class="pcs-btn pcs-forced-passive-btn" data-forced-passive="${room.room_id}" title="Clear the failsafe forced-passive state">✕ Clear forced passive</button>`
       : "";
@@ -1072,7 +1078,7 @@ class PrecisionClimateScheduleCard extends HTMLElement {
 
     return `<div class="pcs-room${paused ? " pcs-room-paused" : ""}${boosted ? " pcs-room-boosted" : ""}${roomAway ? " pcs-room-away" : ""}">
       <div class="pcs-room-name">
-        <span class="pcs-room-name-text">${esc(room.name)}${modeBadge}${heatIcon}${tempSpan}${pausedBadge}${boostBadge}${roomAwayBadge}${forcedPassiveBadge}</span>
+        <span class="pcs-room-name-text">${esc(room.name)}${modeBadge}${heatIcon}${tempSpan}${pausedBadge}${boostBadge}${roomAwayBadge}${forcedPassiveBadge}${windowBadge}</span>
         <span class="pcs-room-actions">${moveBtns}${boostBtn}${roomAwayBtn}${pauseBtn}${forcedPassiveBtn}</span>
       </div>
       ${days}
@@ -1263,6 +1269,7 @@ const STYLE = `
   .pcs-room-away-badge { font-weight: 600; font-size: .72em; text-transform: uppercase; letter-spacing: .04em; padding: 1px 6px; border-radius: 8px; background: #2563eb; color: #fff; white-space: nowrap; }
   .pcs-room-away-btn { white-space: nowrap; }
   .pcs-forced-passive-badge { font-weight: 700; font-size: .72em; letter-spacing: .03em; padding: 1px 6px; border-radius: 8px; background: #b45309; color: #fff; white-space: nowrap; }
+  .pcs-window-badge { font-weight: 700; font-size: .72em; letter-spacing: .03em; padding: 1px 6px; border-radius: 8px; background: #0e7490; color: #fff; white-space: nowrap; }
   .pcs-forced-passive-btn { white-space: nowrap; border-color: #b45309; color: #fbbf24; }
   .pcs-room-away-active { border-color: #2563eb; color: #93c5fd; font-weight: 600; }
   .pcs-room-away .pcs-timeline { opacity: .65; }

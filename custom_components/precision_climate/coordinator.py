@@ -122,6 +122,9 @@ class PrecisionClimateCoordinator:
         # boiler, target unchanged) until manually cleared. Not persisted: a
         # still-broken TRV re-fires the warning and re-applies the action.
         self._room_forced_passive: set[str] = set()
+        # Latest per-room window-open state (respecting the global toggle), for
+        # the card's window indicator. Recomputed each evaluate cycle.
+        self._room_window_open: dict[str, bool] = {}
         # Per-room away: each room's target is capped at its away_target while it
         # is in this set. Manual-only (no timer); independent from global away.
         # Persisted via _room_away_store so it survives reloads without triggering one.
@@ -739,6 +742,7 @@ class PrecisionClimateCoordinator:
             window_open = self.config.respect_window_sensors and any(
                 self._is_window_open(w) for w in cfg.windows
             )
+            self._room_window_open[cfg.room_id] = window_open
             rooms.append(
                 RoomState(
                     room_id=cfg.room_id,
@@ -839,9 +843,13 @@ class PrecisionClimateCoordinator:
         # survives the window and still gets corrected + notified.
         real_boiler = self.hass.states.get(self.config.boiler_switch)
         real_on = real_boiler is not None and real_boiler.state == STATE_ON
-        active_window = any(r.window_open for r in rooms if r.is_active)
+        # Windows are per-room now: the boiler may legitimately run for other
+        # rooms while one active room is windowed. It is only window-unauthorised
+        # when EVERY active room is windowed (the control loop forces it off).
+        active_all = [r for r in rooms if r.is_active]
+        all_active_windowed = bool(active_all) and all(r.window_open for r in active_all)
         unauthorized = is_unauthorized_boiler(
-            real_on, self.master_on, self.paused, active_window
+            real_on, self.master_on, self.paused, all_active_windowed
         )
         if self._unauthorized.update(mono, unauthorized):
             self.hass.async_create_task(self._set_switch(self.config.boiler_switch, False))
@@ -1312,6 +1320,9 @@ class PrecisionClimateCoordinator:
         else:
             self._room_paused.discard(room_id)
         await self.async_evaluate()
+
+    def room_window_open(self, room_id: str) -> bool:
+        return self._room_window_open.get(room_id, False)
 
     def room_forced_passive(self, room_id: str) -> bool:
         return room_id in self._room_forced_passive

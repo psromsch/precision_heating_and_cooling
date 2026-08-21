@@ -159,18 +159,39 @@ def test_paused_forces_everything_off():
     assert decision.reason == "paused"
 
 
-def test_active_window_open_keeps_boiler_off():
-    cold_open = room(temperature=18.0, window_open=True)
-    decision = evaluate([cold_open], SystemState(boiler_on=False))
+def test_windowed_room_valve_closed_and_paused():
+    # A room with an open window is paused: valve closed, excluded from demand.
+    open_room = room(temperature=18.0, window_open=True)  # cold, but window open
+    decision = evaluate([open_room], SystemState(boiler_on=False))
+    assert decision.trv_open["r1"] is False       # valve closed
+    assert decision.boiler_on is False            # excluded -> no demand
+
+
+def test_all_active_windowed_turns_boiler_off():
+    a = room(room_id="a", temperature=18.0, window_open=True)
+    b = room(room_id="b", temperature=18.0, window_open=True)
+    decision = evaluate([a, b], SystemState(boiler_on=True))
     assert decision.boiler_on is False
-    assert decision.reason == "active_window_open"
+    assert decision.reason == "active_windows_open"
 
 
-def test_passive_window_open_does_not_block_boiler():
+def test_windowed_active_room_excluded_others_keep_heating():
+    # One active room windowed, another cold and open-window-free -> boiler runs
+    # for the second, and the windowed room's valve is closed.
+    windowed = room(room_id="win", temperature=15.0, window_open=True)  # would demand
+    heating = room(room_id="warm", temperature=15.0)                    # demands
+    decision = evaluate([windowed, heating], SystemState(boiler_on=False))
+    assert decision.boiler_on is True             # runs for the non-windowed room
+    assert decision.trv_open["win"] is False      # windowed room paused
+    assert decision.trv_open["warm"] is True
+
+
+def test_passive_window_open_closes_its_valve():
     cold_active = room(room_id="active", temperature=18.0)
     passive_open = room(room_id="passive", is_active=False, temperature=18.0, window_open=True)
     decision = evaluate([cold_active, passive_open], SystemState(boiler_on=False))
-    assert decision.boiler_on is True  # passive window is irrelevant to the boiler
+    assert decision.boiler_on is True                 # active room still drives it
+    assert decision.trv_open["passive"] is False      # passive window -> valve closed
 
 
 # --- Sunny day ---------------------------------------------------------------

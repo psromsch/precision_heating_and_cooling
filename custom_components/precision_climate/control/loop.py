@@ -36,7 +36,10 @@ Algorithm (heating):
 
 Overrides (highest priority first):
     1. Master OFF / paused        -> boiler OFF, all TRVs CLOSED.
-    2. Active-room window open     -> boiler OFF (TRVs follow normal per-room rule).
+    2. Room window open            -> that room is paused: its valve is CLOSED
+       and it is excluded from boiler demand. Per-room, not house-wide — the
+       boiler keeps running for other active rooms. Only when EVERY active room
+       is windowed does the boiler turn off.
     3. Sunny-day savings active    -> active-room targets are reduced to the
        configured minimum before any of the above is evaluated.
 
@@ -69,6 +72,11 @@ def _trv_intent(
     prev_open: bool,
 ) -> bool:
     """Decide whether a room's TRV should be open, with latching hysteresis."""
+    if room.window_open:
+        # Window open -> pause this room: close its valve so we don't heat a
+        # vented room. Applies to active and passive rooms alike. (When the
+        # 'respect window sensors' toggle is off, window_open is already False.)
+        return False
     if room.temperature is None:
         if room.is_active:
             # Active room with no thermometer: close the valve. We cannot confirm
@@ -118,12 +126,16 @@ def evaluate(
         for room in rooms
     }
 
-    active_rooms = [room for room in rooms if room.is_active]
+    active_rooms_all = [room for room in rooms if room.is_active]
 
-    # --- Override 2: any active-room window open -> boiler must stay off. -----
-    if any(room.window_open for room in active_rooms):
+    # --- Override 2: windowed rooms are paused (per-room, not house-wide). ----
+    # A room with an open window is excluded from boiler demand (its valve is
+    # already closed above). The boiler runs for whatever active rooms remain;
+    # if EVERY active room is windowed, nothing calls for heat -> boiler off.
+    active_rooms = [room for room in active_rooms_all if not room.window_open]
+    if active_rooms_all and not active_rooms:
         return ControlDecision(
-            boiler_on=False, trv_open=trv_open, reason="active_window_open"
+            boiler_on=False, trv_open=trv_open, reason="active_windows_open"
         )
 
     # --- Boiler latching hysteresis, driven by active rooms only. ------------

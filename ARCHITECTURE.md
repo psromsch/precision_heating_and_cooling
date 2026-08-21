@@ -70,5 +70,11 @@ conflate them.
   the force sentinel (valve max), far above the room target. `trv_mismatch`
   therefore flags a heating valve whose real setpoint is `<= target` — a valve
   at or below its own target while heating didn't take the open command.
-- The pure stages (A and B) are unit-tested in `tests/`. Stage C (orchestration)
-  is not yet — that's the current test debt.
+- The pure stages (A and B) are unit-tested in `tests/`. Stage C is
+  orchestration (timers, live state, apply sequencing) and is harder to test —
+  the two trickiest decisions inside it are extracted into pure functions in
+  `control/gates.py` and unit-tested (`plan_presence_update` — the presence
+  dwell/seeding state machine that regressed twice; `child_lock_recently_unlocked`
+  — the boost relock gate). A full Home-Assistant integration harness
+  (`pytest-homeassistant-custom-component`) for the remaining apply/sentinel and
+  timer paths is still future work.

@@ -67,6 +67,12 @@ from .const import (
     force_flow_setpoint,
 )
 from .control.loop import evaluate
+from .control.gates import (
+    PRESENCE_APPLY,
+    PRESENCE_HOLD,
+    child_lock_recently_unlocked,
+    plan_presence_update,
+)
 from .control.mode import (
     PRESENCE_ABSENT,
     PRESENCE_PRESENT,
@@ -398,29 +404,27 @@ class PrecisionClimateCoordinator:
         if unsub is not None:
             unsub()
 
-        if state is None or state.state in (STATE_UNAVAILABLE, STATE_UNKNOWN):
-            return  # hold last confirmed state
-
-        occupied = state.state == STATE_ON
-        target = PRESENCE_PRESENT if occupied else PRESENCE_ABSENT
-        if self._room_presence.get(room_id) == target:
-            return  # already in this state; nothing to confirm
-
-        # First confirmed reading since startup — e.g. a template sensor that
-        # was still 'unavailable' when we seeded at setup, so it never got a
-        # baseline. Apply it IMMEDIATELY instead of dwelling: the dwell debounces
-        # transitions from a KNOWN state, but the initial value should be taken
-        # at face value. Otherwise a sensor that's been clear for hours makes the
-        # room start active and wait out the whole off-dwell after every restart.
-        if self._room_presence.get(room_id) is None:
-            self._room_presence[room_id] = target
-            self.hass.async_create_task(self.async_evaluate())
-            return
-
         cfg = self.config.room_by_id(room_id)
         if cfg is None:
             return
-        minutes = cfg.presence_on_minutes if occupied else cfg.presence_off_minutes
+        available = state is not None and state.state not in (
+            STATE_UNAVAILABLE,
+            STATE_UNKNOWN,
+        )
+        action, target, minutes = plan_presence_update(
+            current=self._room_presence.get(room_id),
+            is_on=available and state.state == STATE_ON,
+            available=available,
+            on_minutes=cfg.presence_on_minutes,
+            off_minutes=cfg.presence_off_minutes,
+        )
+        if action == PRESENCE_HOLD:
+            return
+        if action == PRESENCE_APPLY:
+            self._room_presence[room_id] = target
+            self.hass.async_create_task(self.async_evaluate())
+            return
+        # PRESENCE_DWELL
         self._presence_dwell_unsub[room_id] = async_call_later(
             self.hass,
             max(0.0, float(minutes)) * 60.0,
@@ -1459,26 +1463,20 @@ class PrecisionClimateCoordinator:
 
     def _child_lock_recently_unlocked(self, room) -> bool:
         """True if the room's lock is currently unlocked but was locked until
-        recently. Fully-locked or long-unlocked rooms return False."""
+        recently. Reads the live lock states and delegates the decision to the
+        pure ``child_lock_recently_unlocked`` gate."""
         now = dt_util.utcnow()
-        off_states = []
+        locks: list[tuple[bool, float | None] | None] = []
         for entity_id in room.child_lock_entities:
             state = self.hass.states.get(entity_id)
             if state is None:
-                return False  # unknown lock -> don't touch it
-            if str(state.state).lower() in ("on", "locked"):
-                continue  # this lock is engaged
-            off_states.append(state)
-        if not off_states:
-            return False  # already fully locked -> nothing to restore
-        for state in off_states:
+                locks.append(None)  # unknown lock
+                continue
+            is_on = str(state.state).lower() in ("on", "locked")
             changed = state.last_changed
-            if (
-                changed is not None
-                and (now - changed).total_seconds() <= CHILD_LOCK_RECENT_UNLOCK_SECONDS
-            ):
-                return True
-        return False
+            secs = (now - changed).total_seconds() if changed is not None else None
+            locks.append((is_on, secs))
+        return child_lock_recently_unlocked(locks, CHILD_LOCK_RECENT_UNLOCK_SECONDS)
 
     def _make_child_relock(self, room_id: str):
         @callback

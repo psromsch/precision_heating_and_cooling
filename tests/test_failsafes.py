@@ -62,8 +62,14 @@ def test_trv_setpoint_mismatch_flags_low_target():
 
 
 def test_trv_setpoint_no_mismatch_when_open():
-    # forced flow target 28 >= schedule 20 -> fine
+    # forced flow target 28 (well above schedule 20) -> valve is open, fine
     assert not trv_setpoint_mismatch(True, True, 28.0, 20.0)
+
+
+def test_trv_setpoint_mismatch_flags_setpoint_equal_to_target():
+    # The blind spot: a valve stuck at exactly the room target reads open to the
+    # old strict '<' check but idles in reality (Master Bedroom / Living trv_4).
+    assert trv_setpoint_mismatch(True, True, actual_trv_target=20.0, schedule_target=20.0)
 
 
 def test_trv_setpoint_mismatch_ignored_when_not_heating_or_boiler_off():

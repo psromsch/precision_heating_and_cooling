@@ -20,7 +20,13 @@ Precedence, highest wins:
      is in effect, lower the schedule target by a fixed delta, clamped so it
      never drops below the room's away target (soft is always gentler than
      full away). Active/passive is untouched.
-  7. Schedule         -> the base target + active flag.
+  7. forced_passive   -> a sticky failsafe action forces the room PASSIVE
+     (active flag only, target untouched). Applied to the global-away and
+     schedule paths. It is intentionally exempt on the early returns above:
+     boost wins over it (an explicit user boost re-heats a failsafe-paused
+     room), and the pause / per-room-away returns are already non-demanding or
+     passive, so it would be a no-op there.
+  8. Schedule         -> the base target + active flag.
 """
 
 from __future__ import annotations

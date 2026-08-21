@@ -62,15 +62,20 @@ def trv_setpoint_mismatch(
     actual_trv_target: float | None,
     schedule_target: float,
 ) -> bool:
-    """True when a room that should be heating has a TRV target below its schedule target.
+    """True when a room that should be heating has a TRV setpoint that is NOT
+    safely open — at or below the room's target.
 
-    We force a heating room's TRV to a high setpoint; if it reads back below the
-    schedule target the valve did not take the command (reverted externally, or
-    a stale/failed write).
+    We force a heating room's TRV to a high open sentinel (the valve's max),
+    far above the target, so a correctly-open valve reads well above target. If
+    it instead reads at or below the target, the valve did not take the open
+    command (reverted externally, a stale/failed write, or a valve that stopped
+    receiving commands) and will idle before the room reaches target — even when
+    the setpoint happens to *equal* the target, which the old strict `<` check
+    silently missed (the Master Bedroom / Living trv_4 incidents).
     """
     if not boiler_on or not room_should_heat or actual_trv_target is None:
         return False
-    return actual_trv_target < schedule_target
+    return actual_trv_target <= schedule_target
 
 
 # --- Stateful timers ---------------------------------------------------------

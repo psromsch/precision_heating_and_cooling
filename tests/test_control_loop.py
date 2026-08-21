@@ -213,6 +213,17 @@ def test_sunny_day_still_heats_below_reduced_minimum():
     assert decision.boiler_on is True
 
 
+def test_sunny_day_never_raises_an_already_lower_target():
+    # Room already reduced below the sunny target (e.g. by soft-away): sunny must
+    # NOT pull it back up. Target 15, sunny 17 -> effective stays 15, so a room
+    # at 16 is satisfied and does not demand.
+    rooms = [room(temperature=16.0, target=15.0)]
+    system = SystemState(boiler_on=False, sunny_day_active=True, sunny_day_target=17.0)
+    decision = evaluate(rooms, system)
+    assert decision.boiler_on is False
+    assert decision.trv_open["r1"] is False
+
+
 # --- Unavailable thermometer -------------------------------------------------
 
 def test_unavailable_thermometer_passive_holds_trv():

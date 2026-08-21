@@ -56,13 +56,18 @@ from ..models.room import ControlDecision, RoomState, SystemState
 
 
 def _effective_target(room: RoomState, system: SystemState) -> float:
-    """Apply the sunny-day reduced target to active rooms when savings are on."""
+    """Apply the sunny-day reduced target to active rooms when savings are on.
+
+    Sunny-day only ever *lowers* the target (min), so it composes with any
+    reduction already applied upstream (soft-away, away): it can't raise a room
+    that is already below the sunny target back up to it.
+    """
     if (
         system.sunny_day_active
         and room.is_active
         and system.sunny_day_target is not None
     ):
-        return system.sunny_day_target
+        return min(room.target, system.sunny_day_target)
     return room.target
 
 

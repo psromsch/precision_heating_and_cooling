@@ -47,6 +47,27 @@ def plan_presence_update(
     return PRESENCE_DWELL, target, (on_minutes if is_on else off_minutes)
 
 
+def soft_away_presence_active(
+    *,
+    available: bool,
+    is_on: bool,
+    seconds_since_change: float | None,
+    grace_seconds: float,
+) -> bool:
+    """True when the soft-away presence sensor means "nobody home" firmly enough
+    to engage soft away.
+
+    Engages only when the sensor is available, reads **off** (no presence), and
+    has been off for at least ``grace_seconds`` (the debounce that stops a flaky
+    motion sensor flapping the boiler; ``grace_seconds == 0`` engages instantly).
+    An unavailable or ``on`` sensor never engages; an ``off`` sensor with an
+    unknown change time is treated conservatively as not-yet-firm.
+    """
+    if not available or is_on:
+        return False
+    return seconds_since_change is not None and seconds_since_change >= grace_seconds
+
+
 def child_lock_recently_unlocked(
     locks: list[tuple[bool, float | None] | None],
     window_seconds: float,

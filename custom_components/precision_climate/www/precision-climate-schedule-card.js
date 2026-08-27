@@ -30,7 +30,7 @@ const DAY_ORDER = ["all", "weekday", "weekend", "mon", "tue", "wed", "thu", "fri
 
 // Shown in the card footer so you can confirm which card version is live
 // after a HACS update (keep in sync with manifest.json).
-const CARD_VERSION = "0.9.17";
+const CARD_VERSION = "0.9.18";
 
 // Escape user-controlled strings (room/zone/person names, error messages)
 // before interpolating into innerHTML — markup in a name must render as text.
@@ -385,6 +385,8 @@ class PrecisionClimateScheduleCard extends HTMLElement {
       soft_away_delta: statusState ? Number(statusState.attributes.soft_away_delta ?? 2) : 2,
       soft_away_states:
         (statusState && statusState.attributes.soft_away_states) || ["armed_away", "armed_vacation"],
+      soft_away_presence_entity: (statusState && statusState.attributes.soft_away_presence_entity) || "",
+      soft_away_presence_off_minutes: statusState ? Number(statusState.attributes.soft_away_presence_off_minutes ?? 10) : 10,
     };
     schedules.forEach((r) => {
       this._settingsDraft.away_targets[r.room_id] = Number(awayTargets[r.room_id] ?? 16);
@@ -401,6 +403,12 @@ class PrecisionClimateScheduleCard extends HTMLElement {
   _alarmEntityIds() {
     return Object.keys(this._hass.states)
       .filter((id) => id.startsWith("alarm_control_panel."))
+      .sort();
+  }
+
+  _binarySensorIds() {
+    return Object.keys(this._hass.states)
+      .filter((id) => id.startsWith("binary_sensor."))
       .sort();
   }
 
@@ -438,6 +446,8 @@ class PrecisionClimateScheduleCard extends HTMLElement {
       soft_away_entity: draft.soft_away_entity || "",
       soft_away_delta: Number(draft.soft_away_delta) || 0,
       soft_away_states: draft.soft_away_states || [],
+      soft_away_presence_entity: draft.soft_away_presence_entity || "",
+      soft_away_presence_off_minutes: Number(draft.soft_away_presence_off_minutes) || 0,
       child_lock_relock_after_boost: !!draft.child_lock_relock_after_boost,
     };
     try {
@@ -653,11 +663,12 @@ class PrecisionClimateScheduleCard extends HTMLElement {
         <div class="pcs-holiday">
           <div class="pcs-holiday-title">🛡️ Soft away (optional)</div>
           <div class="pcs-hint">
-            While the chosen alarm panel is armed (states below), every room's
-            target drops by the delta — the house still heats, just cooler.
-            Any real away (per-room or whole-system) overrules soft away, and
-            it never drops a room below its away target. Leave the entity blank
-            to disable.
+            Every room's target drops by the delta — the house still heats, just
+            cooler — while <b>either</b> trigger is active: the chosen alarm panel
+            is armed (states below), <b>or</b> the presence sensor reads
+            "nobody home" for its grace. Any real away overrules soft away, and
+            it never drops a room below its away target. Leave both entities
+            blank to disable.
           </div>
           <div class="pcs-field pcs-presence-field-wide">
             <label>Alarm panel entity</label>
@@ -686,6 +697,23 @@ class PrecisionClimateScheduleCard extends HTMLElement {
                 )
                 .join("")}
             </select>
+          </div>
+          <div class="pcs-field pcs-presence-field-wide">
+            <label>Presence sensor (optional — "off" = nobody home)</label>
+            <select class="pcs-in pcs-softaway-presence">
+              <option value=""${!d.soft_away_presence_entity ? " selected" : ""}>— none —</option>
+              ${(this._binarySensorIds() || [])
+                .map(
+                  (id) =>
+                    `<option value="${id}"${id === (d.soft_away_presence_entity || "") ? " selected" : ""}>${esc(id)}</option>`
+                )
+                .join("")}
+            </select>
+          </div>
+          <div class="pcs-field">
+            <label>Nobody home for (min) before it engages</label>
+            <input class="pcs-in pcs-softaway-presence-min" type="number" min="0" max="120"
+              step="1" value="${Number(d.soft_away_presence_off_minutes ?? 10)}">
           </div>
         </div>`;
     }
@@ -827,6 +855,14 @@ class PrecisionClimateScheduleCard extends HTMLElement {
     const softStates = this._body.querySelector(".pcs-softaway-states");
     if (softStates) {
       this._settingsDraft.soft_away_states = Array.from(softStates.selectedOptions).map((o) => o.value);
+    }
+    const softPresence = this._body.querySelector(".pcs-softaway-presence");
+    if (softPresence) {
+      this._settingsDraft.soft_away_presence_entity = softPresence.value || "";
+    }
+    const softPresenceMin = this._body.querySelector(".pcs-softaway-presence-min");
+    if (softPresenceMin) {
+      this._settingsDraft.soft_away_presence_off_minutes = parseFloat(softPresenceMin.value) || 0;
     }
   }
 

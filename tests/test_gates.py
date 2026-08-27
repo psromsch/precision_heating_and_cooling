@@ -17,6 +17,7 @@ from custom_components.precision_climate.control.gates import (
     PRESENCE_HOLD,
     child_lock_recently_unlocked,
     plan_presence_update,
+    soft_away_presence_active,
 )
 from custom_components.precision_climate.control.mode import (
     PRESENCE_ABSENT,
@@ -87,3 +88,35 @@ def test_long_standing_unlock_left_alone():
 
 def test_off_with_unknown_change_time_is_not_recent():
     assert child_lock_recently_unlocked([(False, None)], W) is False
+
+
+# --- soft-away presence trigger ----------------------------------------------
+
+def soft(available=True, is_on=False, secs=999.0, grace=600.0):
+    return soft_away_presence_active(
+        available=available, is_on=is_on, seconds_since_change=secs, grace_seconds=grace
+    )
+
+
+def test_soft_presence_unavailable_never_engages():
+    assert soft(available=False) is False
+
+
+def test_soft_presence_someone_home_never_engages():
+    assert soft(is_on=True, secs=9999.0) is False
+
+
+def test_soft_presence_off_past_grace_engages():
+    assert soft(is_on=False, secs=700.0, grace=600.0) is True
+
+
+def test_soft_presence_off_within_grace_waits():
+    assert soft(is_on=False, secs=120.0, grace=600.0) is False
+
+
+def test_soft_presence_zero_grace_engages_instantly():
+    assert soft(is_on=False, secs=0.0, grace=0.0) is True
+
+
+def test_soft_presence_off_unknown_change_time_conservative():
+    assert soft(is_on=False, secs=None, grace=600.0) is False

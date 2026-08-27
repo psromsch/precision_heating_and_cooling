@@ -72,6 +72,7 @@ from .control.gates import (
     PRESENCE_HOLD,
     child_lock_recently_unlocked,
     plan_presence_update,
+    soft_away_presence_active,
 )
 from .control.mode import (
     PRESENCE_ABSENT,
@@ -149,6 +150,8 @@ class PrecisionClimateCoordinator:
         self._boost_unsub: dict[str, object] = {}
         # Pending "re-lock the child lock after a boost" timers, per room.
         self._child_relock_unsub: dict[str, object] = {}
+        # Pending grace-wake for the soft-away presence sensor (single global).
+        self._soft_presence_unsub: object | None = None
         self._boost_store: Store | None = (
             Store(hass, 1, f"{DOMAIN}_{entry_id}_room_boost")
             if entry_id is not None
@@ -261,6 +264,17 @@ class PrecisionClimateCoordinator:
             self._unsubs.append(
                 async_track_state_change_event(self.hass, tracked, self._handle_state_event)
             )
+        # Soft-away presence sensor gets a dedicated handler so 'off for N min'
+        # can arm a grace wake (a plain state change can't fire at grace-elapse).
+        if self.config.soft_away_presence_entity:
+            self._unsubs.append(
+                async_track_state_change_event(
+                    self.hass,
+                    [self.config.soft_away_presence_entity],
+                    self._handle_soft_presence_event,
+                )
+            )
+            self._arm_soft_presence_grace()
         # Watch TRV setpoints for *manual* changes -> Boost Mode. (Our own valve
         # commands are filtered out inside the handler.)
         trvs = list(self._trv_to_room)
@@ -461,6 +475,9 @@ class PrecisionClimateCoordinator:
                 unsub()
         self._cancel_grace_timer()
         self._cancel_presence_timers()
+        if self._soft_presence_unsub is not None:
+            self._soft_presence_unsub()
+            self._soft_presence_unsub = None
         if self._runtime_tick_unsub is not None:
             self._runtime_tick_unsub()
             self._runtime_tick_unsub = None
@@ -635,7 +652,11 @@ class PrecisionClimateCoordinator:
         return state.state == STATE_ON
 
     def _is_soft_away_active(self) -> bool:
-        """True if the configured alarm entity is in one of the armed states."""
+        """True if EITHER soft-away trigger is engaged: the alarm is armed, or
+        the presence sensor has read 'nobody home' for its grace period."""
+        return self._soft_away_alarm_active() or self._soft_away_presence_active()
+
+    def _soft_away_alarm_active(self) -> bool:
         entity = self.config.soft_away_entity
         if not entity:
             return False
@@ -643,6 +664,64 @@ class PrecisionClimateCoordinator:
         if state is None:
             return False
         return state.state in self.config.soft_away_states
+
+    def _soft_away_presence_active(self) -> bool:
+        entity = self.config.soft_away_presence_entity
+        if not entity:
+            return False
+        state = self.hass.states.get(entity)
+        available = state is not None and state.state not in (
+            STATE_UNAVAILABLE,
+            STATE_UNKNOWN,
+        )
+        secs = None
+        if available and state.last_changed is not None:
+            secs = (dt_util.utcnow() - state.last_changed).total_seconds()
+        return soft_away_presence_active(
+            available=available,
+            is_on=available and state.state == STATE_ON,
+            seconds_since_change=secs,
+            grace_seconds=max(0.0, self.config.soft_away_presence_off_minutes) * 60.0,
+        )
+
+    @callback
+    def _handle_soft_presence_event(self, event: Event) -> None:
+        self._arm_soft_presence_grace()
+        self.hass.async_create_task(self.async_evaluate())
+
+    def _arm_soft_presence_grace(self) -> None:
+        """(Re)arm a one-shot wake at grace-elapse so soft-away engages once the
+        presence sensor has read 'off' for its grace, even with no further state
+        change. Cancels any pending wake first."""
+        if self._soft_presence_unsub is not None:
+            self._soft_presence_unsub()
+            self._soft_presence_unsub = None
+        entity = self.config.soft_away_presence_entity
+        if not entity:
+            return
+        state = self.hass.states.get(entity)
+        if state is None or state.state != STATE_OFF:
+            return
+        grace = max(0.0, self.config.soft_away_presence_off_minutes) * 60.0
+        if grace <= 0:
+            return  # instant — _soft_away_presence_active already returns True
+        since = (
+            (dt_util.utcnow() - state.last_changed).total_seconds()
+            if state.last_changed is not None
+            else grace
+        )
+        remaining = max(0.0, grace - since)
+        self._soft_presence_unsub = async_call_later(
+            self.hass, remaining, self._make_soft_presence_wake()
+        )
+
+    def _make_soft_presence_wake(self):
+        @callback
+        def _wake(_now) -> None:
+            self._soft_presence_unsub = None
+            self.hass.async_create_task(self.async_evaluate())
+
+        return _wake
 
     @property
     def soft_away_on(self) -> bool:

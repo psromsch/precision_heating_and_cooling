@@ -129,6 +129,8 @@ class SystemStatusSensor(PrecisionBaseEntity, SensorEntity):
             "soft_away_entity": c.config.soft_away_entity,
             "soft_away_delta": c.config.soft_away_delta,
             "soft_away_states": c.config.soft_away_states,
+            "soft_away_presence_entity": c.config.soft_away_presence_entity,
+            "soft_away_presence_off_minutes": c.config.soft_away_presence_off_minutes,
         }
 
 

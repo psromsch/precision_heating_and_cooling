@@ -125,9 +125,9 @@ That's it. No hidden estimation, no learning period.
 
 You can also set a **per-room away** from the card — handy for a guest room you're not using.
 
-### Soft away (alarm-triggered)
+### Soft away (alarm- or presence-triggered)
 
-A gentler cousin of away: point it at an alarm panel (e.g. **Alarmo**) and, while that panel is armed (by default `armed_away` / `armed_vacation`), **every room's target drops by a fixed amount** you choose. The house still heats — just cooler. It only lowers the target; it doesn't change active/passive. Any real away (per-room, presence, or whole-system) **overrules** soft away, and it never drops a room below its away target — so "soft" is always gentler than "full." Configure it in the card's settings, under Away Mode.
+A gentler cousin of away: **every room's target drops by a fixed amount** you choose while *either* trigger is active — an **alarm panel** (e.g. **Alarmo**) is armed (by default `armed_away` / `armed_vacation`), **or** a **presence sensor** reads "nobody home" (off) for a grace period (default 10 min, set 0 for instant; the grace stops a flaky sensor flapping the boiler). Set either, both, or neither. The house still heats — just cooler. It only lowers the target; it doesn't change active/passive. Any real away (per-room, whole-system) **overrules** soft away, and it never drops a room below its away target — so "soft" is always gentler than "full." Configure it in the card's settings, under Away Mode.
 
 ---
 

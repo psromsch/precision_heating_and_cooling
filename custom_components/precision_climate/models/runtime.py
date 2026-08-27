@@ -206,6 +206,26 @@ class RuntimeConfig:
         return self.settings.get(CONF_SOFT_AWAY_ENTITY) or None
 
     @property
+    def soft_away_presence_entity(self) -> str | None:
+        """A presence/occupancy binary_sensor that also triggers soft away."""
+        from ..const import CONF_SOFT_AWAY_PRESENCE_ENTITY
+
+        return self.settings.get(CONF_SOFT_AWAY_PRESENCE_ENTITY) or None
+
+    @property
+    def soft_away_presence_off_minutes(self) -> float:
+        """Minutes the presence sensor must read 'off' before soft away engages."""
+        from ..const import (
+            CONF_SOFT_AWAY_PRESENCE_OFF_MINUTES,
+            DEFAULT_SOFT_AWAY_PRESENCE_OFF_MINUTES,
+        )
+
+        return _safe_float(
+            self.settings.get(CONF_SOFT_AWAY_PRESENCE_OFF_MINUTES),
+            DEFAULT_SOFT_AWAY_PRESENCE_OFF_MINUTES,
+        )
+
+    @property
     def soft_away_delta(self) -> float:
         """°C to subtract from each target while soft away is active."""
         from ..const import CONF_SOFT_AWAY_DELTA, DEFAULT_SOFT_AWAY_DELTA

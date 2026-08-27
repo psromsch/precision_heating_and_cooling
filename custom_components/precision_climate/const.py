@@ -148,6 +148,13 @@ CONF_SOFT_AWAY_DELTA = "soft_away_delta"       # °C to subtract from each targe
 CONF_SOFT_AWAY_STATES = "soft_away_states"     # armed states that trigger it
 DEFAULT_SOFT_AWAY_DELTA = 2.0
 DEFAULT_SOFT_AWAY_STATES = ["armed_away", "armed_vacation"]
+# Optional second soft-away trigger: a presence/occupancy binary_sensor. Soft
+# away engages when it reads "off" (nobody home) for the grace minutes, OR-ed
+# with the alarm trigger above. A grace avoids a flaky sensor flapping the
+# boiler; 0 = engage instantly.
+CONF_SOFT_AWAY_PRESENCE_ENTITY = "soft_away_presence_entity"
+CONF_SOFT_AWAY_PRESENCE_OFF_MINUTES = "soft_away_presence_off_minutes"
+DEFAULT_SOFT_AWAY_PRESENCE_OFF_MINUTES = 10.0
 
 # Re-enable a room's child lock a short time after a manual boost starts, so you
 # can unlock a TRV to dial a boost by hand and the lock comes back on its own.

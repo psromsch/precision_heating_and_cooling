@@ -291,6 +291,7 @@ class PrecisionClimateCoordinator:
         self._schedule_next_boundary()
         self._setup_presence_tracking()
         self._setup_room_presence_tracking()
+        self._setup_child_lock_guard()
         # Seed the commanded state from the REAL entities so the first evaluation
         # produces a genuine delta when reality disagrees with the decision
         # (e.g. the boiler was left on, or config changed and the loop now wants
@@ -791,6 +792,33 @@ class PrecisionClimateCoordinator:
         """
         async with self._evaluate_lock:
             await self._async_evaluate_locked()
+
+    def _setup_child_lock_guard(self) -> None:
+        """Watch every configured child-lock entity. While the virtual child
+        lock is on, a lock released at the valve is put straight back."""
+        entities = [e for r in self.config.rooms for e in r.child_lock_entities]
+        if not entities:
+            return
+        self._unsubs.append(
+            async_track_state_change_event(
+                self.hass, entities, self._handle_child_lock_event
+            )
+        )
+
+    @callback
+    def _handle_child_lock_event(self, event: Event) -> None:
+        if not self.virtual_child_lock:
+            return  # normal operation: releasing a lock is a legitimate action
+        new_state = event.data.get("new_state")
+        if new_state is None or new_state.state in (STATE_UNAVAILABLE, STATE_UNKNOWN):
+            return
+        if str(new_state.state).lower() in ("on", "locked"):
+            return  # engaged (quite possibly by us) — nothing to do
+        entity_id = event.data.get("entity_id", "")
+        _LOGGER.info("[virtual_child_lock] re-engaging child lock %s", entity_id)
+        self.hass.async_create_task(
+            self._async_set_child_lock_entity(entity_id, True)
+        )
 
     async def _async_evaluate_locked(self) -> None:
         now_local = dt_util.now()
@@ -1375,10 +1403,22 @@ class PrecisionClimateCoordinator:
         await self.async_evaluate()
 
     async def async_set_virtual_child_lock(self, on: bool) -> None:
-        """Turn the global virtual child lock on/off. Re-runs the loop so a lock
-        switched ON immediately corrects any valve already sitting at a manual
-        setpoint."""
+        """Turn the global virtual child lock on/off.
+
+        Switching it ON returns the house to normal immediately: every in-flight
+        boost is cancelled (an existing boost would otherwise outrank the
+        schedule until it expired), every configured child lock is engaged, and
+        the loop re-runs so any valve left at a manual setpoint is corrected.
+        """
         self.virtual_child_lock = on
+        if on:
+            for room_id in list(self._room_boost):
+                self._room_boost.pop(room_id, None)
+                self._cancel_boost_timer(room_id)
+            self._save_boosts()
+            for room in self.config.rooms:
+                for entity_id in room.child_lock_entities:
+                    await self._async_set_child_lock_entity(entity_id, True)
         await self.async_evaluate()
 
     async def async_set_paused(self, paused: bool) -> None:
@@ -1471,15 +1511,19 @@ class PrecisionClimateCoordinator:
         if room is None:
             return
         for entity_id in room.child_lock_entities:
-            domain = entity_id.split(".", 1)[0]
-            if domain == "lock":
-                service = "lock" if on else "unlock"
-            else:  # switch (and any toggleable fallback)
-                service = "turn_on" if on else "turn_off"
-            await self.hass.services.async_call(
-                domain, service, {ATTR_ENTITY_ID: entity_id}, blocking=False
-            )
+            await self._async_set_child_lock_entity(entity_id, on)
         self._notify_listeners()
+
+    async def _async_set_child_lock_entity(self, entity_id: str, on: bool) -> None:
+        """Engage/release a single child-lock entity, dispatching by domain."""
+        domain = entity_id.split(".", 1)[0]
+        if domain == "lock":
+            service = "lock" if on else "unlock"
+        else:  # switch (and any toggleable fallback)
+            service = "turn_on" if on else "turn_off"
+        await self.hass.services.async_call(
+            domain, service, {ATTR_ENTITY_ID: entity_id}, blocking=False
+        )
 
     # --- Boost ---------------------------------------------------------------
 

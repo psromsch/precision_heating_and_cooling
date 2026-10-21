@@ -30,7 +30,7 @@ const DAY_ORDER = ["all", "weekday", "weekend", "mon", "tue", "wed", "thu", "fri
 
 // Shown in the card footer so you can confirm which card version is live
 // after a HACS update (keep in sync with manifest.json).
-const CARD_VERSION = "0.9.18";
+const CARD_VERSION = "0.9.19";
 
 // Escape user-controlled strings (room/zone/person names, error messages)
 // before interpolating into innerHTML — markup in a name must render as text.
@@ -243,12 +243,13 @@ class PrecisionClimateScheduleCard extends HTMLElement {
     const masterEntityId = statusState ? (statusState.attributes.master_switch_entity_id || null) : null;
     const awayOn = statusState ? statusState.attributes.away_on === true : false;
     const softAwayOn = statusState ? statusState.attributes.soft_away_on === true : false;
+    const virtualChildLock = statusState ? statusState.attributes.virtual_child_lock === true : false;
     const softAwayDelta = statusState ? Number(statusState.attributes.soft_away_delta ?? 0) : 0;
     const reason = statusState ? (statusState.state || "") : "";
     const roomsInfo = this._roomsInfo();
 
     this._body.innerHTML =
-      this._renderBoilerStatus(boilerOn, masterOn, masterEntityId, reason, awayOn, softAwayOn, softAwayDelta) +
+      this._renderBoilerStatus(boilerOn, masterOn, masterEntityId, reason, awayOn, softAwayOn, softAwayDelta, virtualChildLock) +
       (this._confirmMaster ? this._renderMasterConfirm() : "") +
       `<div class="${masterOn ? "" : "pcs-master-off"}">` +
       schedules.map((room, i) => this._renderRoom(room, roomsInfo, i, schedules.length)).join("") +
@@ -370,6 +371,11 @@ class PrecisionClimateScheduleCard extends HTMLElement {
       // Per-room child-lock entities + optimistic on-state (read from live state).
       child_lock_entities: {},
       child_lock_on: {},
+      // Virtual child lock (a switch entity, toggled immediately like away).
+      virtual_child_lock: status ? status.attributes.virtual_child_lock === true : false,
+      virtual_child_lock_entity_id: status
+        ? status.attributes.virtual_child_lock_entity_id || null
+        : null,
       // Re-lock the child lock a minute after a manual boost (default on).
       child_lock_relock_after_boost: s.child_lock_relock_after_boost !== false,
       // Presence mode fields.
@@ -516,7 +522,7 @@ class PrecisionClimateScheduleCard extends HTMLElement {
     }
   }
 
-  _renderBoilerStatus(boilerOn, masterOn, masterEntityId, reason, awayOn, softAwayOn, softAwayDelta) {
+  _renderBoilerStatus(boilerOn, masterOn, masterEntityId, reason, awayOn, softAwayOn, softAwayDelta, virtualChildLock) {
     const icon = boilerOn ? "🔥" : "⚪";
     const label = boilerOn ? "Boiler ON" : "Boiler OFF";
     const cls = boilerOn ? "pcs-boiler-on" : "pcs-boiler-off";
@@ -527,6 +533,9 @@ class PrecisionClimateScheduleCard extends HTMLElement {
       softAwayOn && !awayOn
         ? ` <span class="pcs-softaway-badge" title="Alarm armed — all targets lowered by ${softAwayDelta}°">🛡️ soft −${softAwayDelta}°</span>`
         : "";
+    const vclHtml = virtualChildLock
+      ? ` <span class="pcs-vcl-badge" title="Virtual child lock on — setpoints dialled at a TRV are ignored.">🔒 child lock</span>`
+      : "";
 
     let masterBtn = "";
     if (masterEntityId) {
@@ -544,7 +553,7 @@ class PrecisionClimateScheduleCard extends HTMLElement {
     const gearBtn = `<button class="pcs-btn pcs-gear-btn" data-open-settings title="Global configuration">⚙</button>`;
 
     return `<div class="pcs-boiler ${cls}${masterOn ? "" : " pcs-boiler-master-off"}">
-      <span>${icon} <strong>${label}</strong>${reasonHtml}${awayHtml}${softHtml}</span>
+      <span>${icon} <strong>${label}</strong>${reasonHtml}${awayHtml}${softHtml}${vclHtml}</span>
       <span class="pcs-boiler-actions">${masterBtn}${gearBtn}</span>
     </div>`;
   }
@@ -742,11 +751,24 @@ class PrecisionClimateScheduleCard extends HTMLElement {
           <button class="pcs-btn pcs-relock-toggle ${relock ? "pcs-primary" : ""}"
             data-relock="${relock ? "0" : "1"}">${relock ? "On" : "Off"}</button>
         </div>`;
+      const vcl = !!d.virtual_child_lock;
+      const vclToggle = `<div class="pcs-field pcs-childlock-field">
+          <label>🔒 Virtual child lock (all rooms)</label>
+          <button class="pcs-btn pcs-vcl-toggle ${vcl ? "pcs-primary" : ""}"
+            data-vcl="${vcl ? "0" : "1"}">${vcl ? "On" : "Off"}</button>
+        </div>`;
       return `
         <div class="pcs-hint">
-          Engage or release the child lock on each room's TRVs. Configure which
-          entity is a TRV's child lock when you add or edit a room (Configure →
-          the room form). Changes take effect immediately.
+          <b>Virtual child lock</b> ignores any setpoint dialled by hand at a TRV
+          — it starts no boost and the valve snaps straight back. One switch for
+          every room, for when small hands defeat the physical lock. Boosts from
+          this card still work. Takes effect immediately and survives restarts.
+        </div>
+        ${vclToggle}
+        <div class="pcs-hint">
+          Engage or release the physical child lock on each room's TRVs. Configure
+          which entity is a TRV's child lock when you add or edit a room
+          (Configure → the room form). Changes take effect immediately.
         </div>
         ${rows}
         <div class="pcs-hint">
@@ -933,6 +955,26 @@ class PrecisionClimateScheduleCard extends HTMLElement {
         this._syncSettingsFromDom();
         this._settingsDraft.child_lock_relock_after_boost =
           relockBtn.getAttribute("data-relock") === "1";
+        this._render();
+      });
+    }
+    const vclBtn = this._body.querySelector("[data-vcl]");
+    if (vclBtn) {
+      vclBtn.addEventListener("click", async () => {
+        this._syncSettingsFromDom();
+        const eid = this._settingsDraft.virtual_child_lock_entity_id;
+        const want = vclBtn.getAttribute("data-vcl") === "1";
+        if (eid) {
+          try {
+            await this._hass.callService("switch", want ? "turn_on" : "turn_off", {
+              entity_id: eid,
+            });
+          } catch (err) {
+            this._error = (err && err.message) || "Could not toggle the virtual child lock.";
+          }
+        }
+        // Optimistic: live state may lag the command; reflect intent now.
+        this._settingsDraft.virtual_child_lock = want;
         this._render();
       });
     }
@@ -1260,6 +1302,7 @@ const STYLE = `
 
   /* Away mode */
   .pcs-away-badge { font-weight: 700; font-size: .72em; letter-spacing: .04em; padding: 1px 6px; border-radius: 8px; background: #2563eb; color: #fff; white-space: nowrap; }
+  .pcs-vcl-badge { font-weight: 700; font-size: .72em; letter-spacing: .04em; padding: 1px 6px; border-radius: 8px; background: #7c3aed; color: #fff; white-space: nowrap; }
   .pcs-softaway-badge { font-weight: 700; font-size: .72em; letter-spacing: .04em; padding: 1px 6px; border-radius: 8px; background: #0d9488; color: #fff; white-space: nowrap; }
   .pcs-away-toggle-row { margin-bottom: 8px; }
   .pcs-away-toggle { font-weight: 600; }

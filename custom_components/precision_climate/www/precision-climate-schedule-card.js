@@ -30,7 +30,7 @@ const DAY_ORDER = ["all", "weekday", "weekend", "mon", "tue", "wed", "thu", "fri
 
 // Shown in the card footer so you can confirm which card version is live
 // after a HACS update (keep in sync with manifest.json).
-const CARD_VERSION = "0.9.19";
+const CARD_VERSION = "0.9.20";
 
 // Escape user-controlled strings (room/zone/person names, error messages)
 // before interpolating into innerHTML — markup in a name must render as text.
@@ -759,10 +759,12 @@ class PrecisionClimateScheduleCard extends HTMLElement {
         </div>`;
       return `
         <div class="pcs-hint">
-          <b>Virtual child lock</b> ignores any setpoint dialled by hand at a TRV
-          — it starts no boost and the valve snaps straight back. One switch for
-          every room, for when small hands defeat the physical lock. Boosts from
-          this card still work. Takes effect immediately and survives restarts.
+          <b>Virtual child lock</b> — one switch for every room, for when small
+          hands defeat the physical lock. While on: a setpoint dialled at a TRV
+          is ignored (no boost, and the valve snaps straight back), and any
+          child lock released at a valve is re-engaged immediately. Switching it
+          on also cancels any boost already running, so targets return to the
+          schedule at once. Boosts from this card still work. Survives restarts.
         </div>
         ${vclToggle}
         <div class="pcs-hint">

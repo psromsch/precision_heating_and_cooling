@@ -73,6 +73,7 @@ from .control.gates import (
     child_lock_recently_unlocked,
     plan_presence_update,
     soft_away_presence_active,
+    trv_drift_grace_active,
 )
 from .control.mode import (
     PRESENCE_ABSENT,
@@ -116,6 +117,11 @@ class PrecisionClimateCoordinator:
 
         # User-facing master controls (mutated by the master switch / pause entities).
         self.master_on: bool = True
+        # Virtual child lock: while on, manual setpoint changes made AT a TRV are
+        # ignored (no boost) and the valve is snapped back to its sentinel. One
+        # global toggle covering every room. Restored across restarts by its
+        # switch entity — a safety lock must not silently clear on reboot.
+        self.virtual_child_lock: bool = False
         self.paused: bool = False
         # Away mode: while on, each room's target is capped at its configured
         # away target (min of schedule and away). Active/passive is untouched.
@@ -568,6 +574,17 @@ class PrecisionClimateCoordinator:
         # Ignore our own valve commands (the force/block sentinels).
         if self._is_trv_sentinel(entity_id, new_target):
             return
+        if self.virtual_child_lock:
+            # Virtual child lock: a dial turned at the valve must have no effect.
+            # Start no boost, and re-run the loop so _apply snaps the valve back
+            # to its sentinel (the drift grace is bypassed while locked).
+            _LOGGER.info(
+                "[virtual_child_lock] ignoring manual TRV change on %s (%.1f)",
+                entity_id,
+                new_target,
+            )
+            self.hass.async_create_task(self.async_evaluate())
+            return
         self.hass.async_create_task(self.async_set_room_boost(room_id, new_target))
 
     def _is_trv_sentinel(self, entity_id: str, value: float) -> bool:
@@ -596,9 +613,15 @@ class PrecisionClimateCoordinator:
         # A setpoint that moved in the last few minutes is a live human hand
         # (a boost is being dialed, or its event is still in flight) — never
         # correct it. Stale valves — the case this guard exists for — have been
-        # sitting at their value far longer than this grace.
+        # sitting at their value far longer than this grace. The virtual child
+        # lock bypasses the grace: that hand is what it exists to override.
         changed = self._trv_setpoint_changed_mono.get(entity_id)
-        if changed is not None and time.monotonic() - changed < TRV_DRIFT_GRACE_SECONDS:
+        since = None if changed is None else time.monotonic() - changed
+        if trv_drift_grace_active(
+            seconds_since_change=since,
+            grace_seconds=TRV_DRIFT_GRACE_SECONDS,
+            virtual_child_lock=self.virtual_child_lock,
+        ):
             return False
         intended = (
             self._trv_force_setpoint(entity_id)
@@ -1349,6 +1372,13 @@ class PrecisionClimateCoordinator:
 
     async def async_set_master(self, on: bool) -> None:
         self.master_on = on
+        await self.async_evaluate()
+
+    async def async_set_virtual_child_lock(self, on: bool) -> None:
+        """Turn the global virtual child lock on/off. Re-runs the loop so a lock
+        switched ON immediately corrects any valve already sitting at a manual
+        setpoint."""
+        self.virtual_child_lock = on
         await self.async_evaluate()
 
     async def async_set_paused(self, paused: bool) -> None:

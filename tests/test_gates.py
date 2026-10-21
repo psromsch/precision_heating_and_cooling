@@ -18,6 +18,7 @@ from custom_components.precision_climate.control.gates import (
     child_lock_recently_unlocked,
     plan_presence_update,
     soft_away_presence_active,
+    trv_drift_grace_active,
 )
 from custom_components.precision_climate.control.mode import (
     PRESENCE_ABSENT,
@@ -120,3 +121,33 @@ def test_soft_presence_zero_grace_engages_instantly():
 
 def test_soft_presence_off_unknown_change_time_conservative():
     assert soft(is_on=False, secs=None, grace=600.0) is False
+
+
+# --- TRV drift grace / virtual child lock ------------------------------------
+
+def grace(since, g=180.0, lock=False):
+    return trv_drift_grace_active(
+        seconds_since_change=since, grace_seconds=g, virtual_child_lock=lock
+    )
+
+
+def test_recent_manual_turn_is_not_fought():
+    # A hand on the dial 10 s ago -> hold off correcting.
+    assert grace(10.0) is True
+
+
+def test_stale_setpoint_is_corrected():
+    # Sitting still far longer than the grace -> correct it.
+    assert grace(600.0) is False
+
+
+def test_never_moved_setpoint_is_corrected():
+    assert grace(None) is False
+
+
+def test_virtual_child_lock_bypasses_the_grace():
+    # The whole point: with the lock on, a hand that JUST moved the dial is
+    # overridden immediately instead of being protected for the grace window.
+    assert grace(0.5, lock=True) is False
+    assert grace(10.0, lock=True) is False
+    assert grace(None, lock=True) is False

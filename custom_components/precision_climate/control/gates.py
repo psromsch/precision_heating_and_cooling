@@ -47,6 +47,25 @@ def plan_presence_update(
     return PRESENCE_DWELL, target, (on_minutes if is_on else off_minutes)
 
 
+def trv_drift_grace_active(
+    *,
+    seconds_since_change: float | None,
+    grace_seconds: float,
+    virtual_child_lock: bool,
+) -> bool:
+    """Whether to HOLD OFF correcting a valve whose setpoint recently moved.
+
+    Normally a setpoint that moved in the last few minutes is a live human hand
+    (a boost being dialled), so the loop must not fight it mid-turn. With the
+    **virtual child lock** on, that hand is exactly what we're overriding — the
+    grace is skipped so the valve snaps straight back to its sentinel instead of
+    sitting at the manual value for the whole grace window.
+    """
+    if virtual_child_lock:
+        return False
+    return seconds_since_change is not None and seconds_since_change < grace_seconds
+
+
 def soft_away_presence_active(
     *,
     available: bool,

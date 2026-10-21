@@ -109,6 +109,8 @@ class SystemStatusSensor(PrecisionBaseEntity, SensorEntity):
             "boiler_switch_entity_id": c.config.boiler_switch,
             "away_on": c.away_on,
             "away_switch_entity_id": own_entity("away", "switch"),
+            "virtual_child_lock": c.virtual_child_lock,
+            "virtual_child_lock_entity_id": own_entity("virtual_child_lock", "switch"),
             "paused": c.paused,
             "rooms": rooms,
             # Global settings managed from the card's config panel.

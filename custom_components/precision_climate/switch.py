@@ -20,6 +20,7 @@ async def async_setup_entry(
     entities: list = [
         MasterSwitch(coordinator, entry.entry_id),
         AwayModeSwitch(coordinator, entry.entry_id),
+        VirtualChildLockSwitch(coordinator, entry.entry_id),
     ]
     entities += [
         RoomPauseSwitch(coordinator, entry.entry_id, room)
@@ -94,6 +95,44 @@ class AwayModeSwitch(PrecisionBaseEntity, SwitchEntity, RestoreEntity):
 
     async def async_turn_off(self, **kwargs) -> None:
         await self._coordinator.async_set_away(False)
+
+
+class VirtualChildLockSwitch(PrecisionBaseEntity, SwitchEntity, RestoreEntity):
+    """Global virtual child lock.
+
+    While on, a setpoint dialled by hand AT a TRV is ignored: it starts no
+    boost, and the valve is snapped straight back to the sentinel the loop
+    intends for it (the usual "don't fight a human hand" grace is bypassed,
+    since that hand is exactly what this overrides). One toggle covers every
+    room. Deliberate boosts from the card still work — this only blocks the
+    valves themselves, for when a small pair of hands defeats the physical
+    child lock. Restored across restarts: a safety lock must not clear on
+    reboot.
+    """
+
+    _attr_name = "Virtual Child Lock"
+    _attr_icon = "mdi:lock-alert"
+
+    def __init__(self, coordinator, entry_id: str) -> None:
+        super().__init__(coordinator, entry_id)
+        self._attr_unique_id = f"{entry_id}_virtual_child_lock"
+
+    async def async_added_to_hass(self) -> None:
+        await super().async_added_to_hass()
+        last = await self.async_get_last_state()
+        # Default is OFF; only an explicit ON needs restoring.
+        if last is not None and last.state == STATE_ON:
+            await self._coordinator.async_set_virtual_child_lock(True)
+
+    @property
+    def is_on(self) -> bool:
+        return self._coordinator.virtual_child_lock
+
+    async def async_turn_on(self, **kwargs) -> None:
+        await self._coordinator.async_set_virtual_child_lock(True)
+
+    async def async_turn_off(self, **kwargs) -> None:
+        await self._coordinator.async_set_virtual_child_lock(False)
 
 
 class RoomPauseSwitch(PrecisionBaseEntity, SwitchEntity, RestoreEntity):

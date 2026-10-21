@@ -152,6 +152,7 @@ Rooms with an occupancy sensor show a neutral timeline on the card (targets only
 - **Boost** — just grab a radiator and turn its dial up by hand. Precision Climate notices, makes that room active at the temperature you dialled for a few hours (configurable), then quietly returns it to its schedule. It won't fight your hand while you turn it, and a restart won't cancel a boost in progress.
 - **Windows** — open a window in a room and that room is **paused**: its valve closes and it stops calling for heat until the window shuts. It's per-room, so the boiler keeps heating the other rooms; only when *every* active room has a window open does the boiler switch off. You can temporarily suspend the whole feature with the **Respect window sensors** toggle in the card's settings (Boost tab).
 - **Child locks** *(optional)* — map a lock entity per TRV and toggle them from the card.
+- **Virtual child lock** — one global switch (`switch.precision_climate_virtual_child_lock`). While on, a setpoint dialled **by hand at a TRV** is ignored: it starts no boost and the valve snaps straight back to where the system wants it. For when small hands defeat the physical lock. Boosts from the card still work, and the lock survives restarts.
 
 ---
 

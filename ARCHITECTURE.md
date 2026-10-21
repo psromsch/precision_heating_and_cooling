@@ -44,6 +44,9 @@ boiler and each valve.
 - **Apply** — command the boiler and each valve to its force/block sentinel
   (the valve's own max/min). The **boost drift-guard** leaves a hand-dialed
   valve alone for `TRV_DRIFT_GRACE_SECONDS` (180 s) so it isn't fought mid-turn.
+  The global **virtual child lock** bypasses that grace and suppresses
+  dial-started boosts entirely, so a setpoint changed at the valve is ignored
+  and snapped back (see `trv_drift_grace_active` in `control/gates.py`).
 - **Failsafes** — `unauthorized_boiler`, `prolonged_heating` (5 h), `overheating`,
   `trv_mismatch`, `trv_unresponsive`, `trv_unavailable`. Each notifies and can
   take a **sticky action** (pause / away / passive / boiler-off), configured per

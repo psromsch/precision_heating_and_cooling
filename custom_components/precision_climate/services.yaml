@@ -69,7 +69,7 @@ set_room_forced_passive:
       example: living
       selector:
         text:
-    on:
+    "on":
       name: On
       description: true to force passive, false to clear.
       required: true
@@ -126,7 +126,7 @@ set_room_child_lock:
       example: living
       selector:
         text:
-    on:
+    "on":
       name: On
       description: true to engage the child lock, false to release it.
       required: true

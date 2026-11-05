@@ -298,7 +298,7 @@ async def _async_register_card(hass: HomeAssistant) -> None:
         return
     hass.data[f"{DOMAIN}_card_registered"] = True
 
-    version = _manifest_version()
+    version = await _async_manifest_version(hass)
     www_dir = os.path.join(os.path.dirname(__file__), "www")
 
     for filename in CARD_FILENAMES:
@@ -382,13 +382,17 @@ async def _async_register_lovelace_resource(
         return False
 
 
-def _manifest_version() -> str:
-    """Return the integration version from manifest.json for cache-busting."""
-    import json
+async def _async_manifest_version(hass: HomeAssistant) -> str:
+    """Return the integration version, for cache-busting the card URLs.
 
+    Asks Home Assistant's loader, which already holds every integration's
+    parsed manifest in memory. Reading manifest.json ourselves did real file
+    I/O on the event loop — harmless but blocking, and HA warns about it.
+    """
     try:
-        path = os.path.join(os.path.dirname(__file__), "manifest.json")
-        with open(path, encoding="utf-8") as fh:
-            return str(json.load(fh).get("version", "0"))
+        from homeassistant.loader import async_get_integration
+
+        integration = await async_get_integration(hass, DOMAIN)
+        return str(integration.version or "0")
     except Exception:  # noqa: BLE001
         return "0"
